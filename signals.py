@@ -1,64 +1,76 @@
-from typing import Dict, List
+from typing import Dict
 
 
-def calculate_score(data: Dict):
+def generate_signal(mtf_data: Dict):
 
     score = 0
-    reasons: List[str] = []
+    reasons = []
 
-    # EMA
-    if data.get("ema"):
+    tf5 = mtf_data["5m"]
+    tf15 = mtf_data["15m"]
+    tf1h = mtf_data["1h"]
+
+    # ===== TREND =====
+    if tf1h["ema20"] > tf1h["ema50"]:
+        score += 20
+        reasons.append("1H Uptrend")
+
+    if tf15["ema20"] > tf15["ema50"]:
         score += 15
-        reasons.append("EMA Trend Confirmed")
+        reasons.append("15M Uptrend")
 
-    # RSI
-    if data.get("rsi"):
+    if tf5["ema20"] > tf5["ema50"]:
         score += 10
-        reasons.append("RSI Healthy")
+        reasons.append("5M Entry Trend")
 
-    # Volume
-    if data.get("volume"):
+    # ===== RSI =====
+    if 50 <= tf5["rsi"] <= 70:
+        score += 10
+        reasons.append("Healthy RSI")
+
+    # ===== MACD =====
+    if tf5["macd"] > tf5["macd_signal"]:
+        score += 10
+        reasons.append("Bullish MACD")
+
+    # ===== ADX =====
+    if tf5["adx"] >= 25:
+        score += 10
+        reasons.append("Strong Trend")
+
+    # ===== VOLUME =====
+    if tf5["volume"] > tf5["volume_sma"]:
         score += 10
         reasons.append("High Volume")
 
-    # Trend
-    if data.get("trend"):
-        score += 20
-        reasons.append("Trend Confirmed")
+    # ===== BOLLINGER =====
+    if tf5["close"] > tf5["bb_middle"]:
+        score += 5
+        reasons.append("Above Bollinger Middle")
 
-    # Multi Timeframe
-    if data.get("mtf"):
-        score += 20
-        reasons.append("Multi-Timeframe Confirmed")
+    # ===== ATR =====
+    if tf5["atr"] > 0:
+        score += 5
+        reasons.append("ATR Confirmed")
 
-    # Risk Reward
-    if data.get("rr"):
-        score += 15
-        reasons.append("Good Risk Reward")
+    # ===== SIGNAL =====
+    if score >= 95:
+        signal = "🔥 ELITE BUY"
 
-    # Price Action
-    if data.get("price_action"):
-        score += 10
-        reasons.append("Price Action Confirmed")
-
-    return score, reasons
-
-
-def generate_signal(data: Dict):
-
-    score, reasons = calculate_score(data)
-
-    if score >= 90:
-        signal = "STRONG BUY"
+    elif score >= 90:
+        signal = "🟢 STRONG BUY"
 
     elif score >= 80:
-        signal = "BUY"
+        signal = "🟢 BUY"
+
+    elif score >= 65:
+        signal = "🟡 WATCH"
 
     else:
-        signal = None
+        signal = "⚪ NO TRADE"
 
     return {
         "signal": signal,
         "score": score,
-        "reasons": reasons,
+        "reasons": reasons
     }
