@@ -1,10 +1,10 @@
 import requests
 import pandas as pd
 
-BASE_URL = "https://api.binance.com"
+BASE_URL = "https://api.binance.com/api/v3/klines"
 
-def get_candles(symbol, interval="15m", limit=100):
-    url = f"{BASE_URL}/api/v3/klines"
+
+def get_candles(symbol, interval="15m", limit=200):
 
     params = {
         "symbol": symbol,
@@ -12,7 +12,7 @@ def get_candles(symbol, interval="15m", limit=100):
         "limit": limit
     }
 
-    response = requests.get(url, params=params, timeout=10)
+    response = requests.get(BASE_URL, params=params, timeout=10)
     response.raise_for_status()
 
     data = response.json()
@@ -25,14 +25,22 @@ def get_candles(symbol, interval="15m", limit=100):
         "close",
         "volume",
         "close_time",
-        "quote_asset_volume",
-        "number_of_trades",
-        "taker_buy_base",
-        "taker_buy_quote",
+        "quote_volume",
+        "trades",
+        "tb_base",
+        "tb_quote",
         "ignore"
     ])
 
-    df["close"] = df["close"].astype(float)
-    df["volume"] = df["volume"].astype(float)
+    numeric = [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+    ]
+
+    for col in numeric:
+        df[col] = df[col].astype(float)
 
     return df
