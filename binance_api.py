@@ -5,6 +5,9 @@ BASE_URL = "https://api.binance.com/api/v3/klines"
 
 
 def get_candles(symbol, interval="15m", limit=200):
+    """
+    Fetch candlestick (OHLCV) data from Binance
+    """
 
     params = {
         "symbol": symbol,
@@ -16,6 +19,9 @@ def get_candles(symbol, interval="15m", limit=200):
     response.raise_for_status()
 
     data = response.json()
+
+    if not data:
+        raise ValueError(f"No candle data returned for {symbol}")
 
     df = pd.DataFrame(data, columns=[
         "time",
@@ -32,7 +38,7 @@ def get_candles(symbol, interval="15m", limit=200):
         "ignore"
     ])
 
-    numeric = [
+    numeric_columns = [
         "open",
         "high",
         "low",
@@ -40,7 +46,11 @@ def get_candles(symbol, interval="15m", limit=200):
         "volume"
     ]
 
-    for col in numeric:
-        df[col] = df[col].astype(float)
+    for col in numeric_columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.dropna()
+
+    df = df.sort_values("time").reset_index(drop=True)
 
     return df
