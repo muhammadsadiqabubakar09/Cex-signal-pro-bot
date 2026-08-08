@@ -1,31 +1,74 @@
-from binance_api import get_candles
-from indicators import add_indicators, analyze
+from watchlist import get_watchlist
+from multi_timeframe import analyze_symbol
+from signals import generate_signal
+from risk_manager import calculate_trade
+from formatter import format_signal
+from logger import log_info, log_warning, log_error
+
+MIN_SCORE = 80
 
 
-def scan(symbol):
+def scan_symbol(symbol):
 
-    df = get_candles(symbol)
+    try:
 
-    df = add_indicators(df)
+        log_info(f"Scanning {symbol}")
 
-    result = analyze(df)
+        mtf_data = analyze_symbol(symbol)
 
-    if result:
-        result["symbol"] = symbol
-        result["price"] = round(df.iloc[-1]["close"], 4)
+        if mtf_data is None:
+            log_warning(f"No market data for {symbol}")
+            return None
 
-    return result
+        signal_data = generate_signal(mtf_data)
+
+        if signal_data["score"] < MIN_SCORE:
+            return None
+
+        price = mtf_data["5m"]["close"]
+        atr = mtf_data["5m"]["atr"]
+
+        risk_data = calculate_trade(
+            price,
+            atr,
+            signal_data
+        )
+
+        message = format_signal(
+            symbol,
+            signal_data,
+            risk_data
+        )
+
+        return {
+            "symbol": symbol,
+            "score": signal_data["score"],
+            "message": message
+        }
+
+    except Exception as e:
+
+        log_error(f"{symbol}: {e}")
+
+        return None
 
 
-def scan_all(symbols):
+def scan_market():
 
-    signals = []
+    watchlist = get_watchlist()
 
-    for symbol in symbols:
+    results = []
 
-        signal = scan(symbol)
+    for symbol in watchlist:
 
-        if signal:
-            signals.append(signal)
+        result = scan_symbol(symbol)
 
-    return signals
+        if result:
+            results.append(result)
+
+    results.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    return results[:5]
