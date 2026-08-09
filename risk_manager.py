@@ -2,19 +2,33 @@ from typing import Dict
 
 
 def calculate_trade(price: float, atr: float, signal_data: Dict):
+    """
+    Calculate Entry, Stop Loss, Take Profit,
+    Risk/Reward and Suggested Leverage.
+    """
+
+    # =========================
+    # VALIDATION
+    # =========================
+
+    if price <= 0:
+        return {}
+
+    if atr <= 0:
+        return {}
 
     direction = signal_data["direction"]
+    market = signal_data["market"]
     confidence = signal_data["confidence"]
 
-    if direction == "BUY":
+    if direction == "NONE":
+        return {}
 
-        stop_loss = price - (1.5 * atr)
+    # =========================
+    # STOP LOSS & TAKE PROFIT
+    # =========================
 
-        tp1 = price + (2 * atr)
-        tp2 = price + (3 * atr)
-        tp3 = price + (4 * atr)
-
-    elif direction == "LONG":
+    if direction in ["BUY", "LONG"]:
 
         stop_loss = price - (1.5 * atr)
 
@@ -33,6 +47,10 @@ def calculate_trade(price: float, atr: float, signal_data: Dict):
     else:
         return {}
 
+    # =========================
+    # RISK CALCULATION
+    # =========================
+
     risk = abs(price - stop_loss)
     reward = abs(tp2 - price)
 
@@ -41,20 +59,36 @@ def calculate_trade(price: float, atr: float, signal_data: Dict):
 
     risk_reward = round(reward / risk, 2)
 
-    # Suggested Leverage
-    if confidence == "VERY HIGH":
-        leverage = "3x"
+    # =========================
+    # LEVERAGE
+    # =========================
 
-    elif confidence == "HIGH":
-        leverage = "4x"
-
-    elif confidence == "MEDIUM":
-        leverage = "5x"
+    if market == "SPOT":
+        leverage = "None"
 
     else:
-        leverage = "-"
+
+        if confidence == "VERY HIGH":
+            leverage = "5x"
+
+        elif confidence == "HIGH":
+            leverage = "3x"
+
+        elif confidence == "MEDIUM":
+            leverage = "2x"
+
+        else:
+            leverage = "None"
+
+    # =========================
+    # RETURN
+    # =========================
 
     return {
+
+        "market": market,
+
+        "direction": direction,
 
         "entry": round(price, 6),
 
@@ -70,5 +104,4 @@ def calculate_trade(price: float, atr: float, signal_data: Dict):
         "risk_reward": risk_reward,
 
         "suggested_leverage": leverage
-
     }
