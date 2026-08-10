@@ -1,56 +1,71 @@
+from datetime import datetime
+
+
 def format_signal(symbol, signal_data, risk_data):
+    """
+    Format trading signal for Telegram.
+    """
+
+    if not risk_data:
+        return None
 
     reasons = "\n".join(
-        [f"✅ {r}" for r in signal_data["reasons"]]
+        f"✅ {reason}" for reason in signal_data["reasons"]
     )
 
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
     message = f"""
-{signal_data['signal']}
+🚀 <b>CEX SIGNAL PRO</b>
 
-Coin:
-{symbol}
+🪙 <b>Coin:</b> {symbol}
 
-Market:
-{signal_data['market']}
+📊 <b>Market:</b> {risk_data["market"]}
+📈 <b>Direction:</b> {risk_data["direction"]}
 
-Direction:
-{signal_data['direction']}
+⭐ <b>Confidence:</b> {signal_data["confidence"]}
+🎯 <b>Score:</b> {signal_data["score"]}/100
 
-Confidence:
-{signal_data['score']}% ({signal_data['confidence']})
+━━━━━━━━━━━━━━━━━━
 
-Entry:
-{risk_data['entry']}
+💰 <b>Entry:</b>
+<code>{risk_data["entry"]}</code>
 
-Stop Loss:
-{risk_data['stop_loss']}
+🛑 <b>Stop Loss:</b>
+<code>{risk_data["stop_loss"]}</code>
 
-Take Profit
+🎯 <b>Take Profit</b>
 
-TP1:
-{risk_data['tp1']}
+TP1: <code>{risk_data["tp1"]}</code>
+TP2: <code>{risk_data["tp2"]}</code>
+TP3: <code>{risk_data["tp3"]}</code>
 
-TP2:
-{risk_data['tp2']}
+━━━━━━━━━━━━━━━━━━
 
-TP3:
-{risk_data['tp3']}
+⚖️ <b>Risk / Reward:</b>
+{risk_data["risk_reward"]}
 
-Risk:
-{risk_data['risk_percent']}%
+📉 <b>Risk:</b>
+{risk_data["risk_percent"]}%
 
-Reward:
-{risk_data['reward_percent']}%
+📈 <b>Reward:</b>
+{risk_data["reward_percent"]}%
 
-Risk / Reward:
-1 : {risk_data['risk_reward']}
+⚡ <b>Suggested Leverage:</b>
+{risk_data["suggested_leverage"]}
 
-Suggested Leverage:
-{risk_data['suggested_leverage']}
+━━━━━━━━━━━━━━━━━━
 
-Reasons
+📌 <b>Reasons</b>
 
 {reasons}
+
+━━━━━━━━━━━━━━━━━━
+
+🕒 <b>Generated:</b>
+{timestamp}
+
+⚠️ <i>Always use proper risk management. Never risk more than you can afford to lose.</i>
 """
 
     return message.strip()
