@@ -3,72 +3,64 @@ from multi_timeframe import analyze_symbol
 from signals import generate_signal
 from risk_manager import calculate_trade
 from formatter import format_signal
-from logger import log_info, log_warning, log_error
-
-MIN_SCORE = 80
 
 
 def scan_symbol(symbol):
+    """
+    Scan a single symbol and return formatted signal.
+    """
 
-    try:
+    mtf_data = analyze_symbol(symbol)
 
-        log_info(f"Scanning {symbol}")
-
-        mtf_data = analyze_symbol(symbol)
-
-        if mtf_data is None:
-            log_warning(f"No market data for {symbol}")
-            return None
-
-        signal_data = generate_signal(mtf_data)
-
-        if signal_data["score"] < MIN_SCORE:
-            return None
-
-        price = mtf_data["5m"]["close"]
-        atr = mtf_data["5m"]["atr"]
-
-        risk_data = calculate_trade(
-            price,
-            atr,
-            signal_data
-        )
-
-        message = format_signal(
-            symbol,
-            signal_data,
-            risk_data
-        )
-
-        return {
-            "symbol": symbol,
-            "score": signal_data["score"],
-            "message": message
-        }
-
-    except Exception as e:
-
-        log_error(f"{symbol}: {e}")
-
+    if mtf_data is None:
         return None
+
+    signal_data = generate_signal(mtf_data)
+
+    if signal_data["direction"] == "NONE":
+        return None
+
+    price = mtf_data["5m"]["close"]
+    atr = mtf_data["5m"]["atr"]
+
+    risk_data = calculate_trade(
+        price,
+        atr,
+        signal_data
+    )
+
+    if not risk_data:
+        return None
+
+    message = format_signal(
+        symbol,
+        signal_data,
+        risk_data
+    )
+
+    return message
 
 
 def scan_market():
+    """
+    Scan all watchlist coins.
+    """
 
     watchlist = get_watchlist()
 
-    results = []
+    signals = []
 
     for symbol in watchlist:
 
-        result = scan_symbol(symbol)
+        try:
 
-        if result:
-            results.append(result)
+            message = scan_symbol(symbol)
 
-    results.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
+            if message:
+                signals.append(message)
 
-    return results[:5]
+        except Exception as e:
+
+            print(f"{symbol}: {e}")
+
+    return signals
