@@ -1,28 +1,35 @@
 import os
 
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
-    ContextTypes
+    ContextTypes,
 )
 
 from scanner import scan_market
 from logger import log_info, log_error
 
-TOKEN = os.getenv("BOT_TOKEN", "")
+TOKEN = os.getenv("BOT_TOKEN")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Start command.
+    """
 
     await update.message.reply_text(
         "✅ CEX Signal Pro Bot is Online.\n\n"
-        "Commands:\n"
-        "/scan - Scan market for Top Signals"
+        "Available Commands:\n"
+        "/scan - Scan market for trading signals"
     )
 
 
 async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Scan market and send signals.
+    """
 
     await update.message.reply_text(
         "🔍 Scanning market...\nPlease wait..."
@@ -33,36 +40,40 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         results = scan_market()
 
         if not results:
-
             await update.message.reply_text(
-                "⚪ No high-quality trading signal found."
+                "⚪ No high-quality trading signals found."
             )
-
             return
 
-        for item in results:
+        for message in results:
 
             await update.message.reply_text(
-                item["message"]
+                text=message,
+                parse_mode=ParseMode.HTML
             )
 
-        log_info("Market scan completed.")
+        log_info(f"Market scan completed. {len(results)} signal(s) sent.")
 
     except Exception as e:
 
         log_error(str(e))
 
         await update.message.reply_text(
-            "❌ Scan failed."
+            "❌ An unexpected error occurred while scanning."
         )
 
 
 def main():
 
+    if not TOKEN:
+        raise ValueError("BOT_TOKEN environment variable is missing.")
+
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("scan", scan))
+
+    log_info("Bot started successfully.")
 
     app.run_polling()
 
