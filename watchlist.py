@@ -1,8 +1,9 @@
 import requests
 
-BINANCE_TICKER = "https://api.binance.com/api/v3/ticker/24hr"
+PRIMARY_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
+FALLBACK_URL = "https://api.binance.com/api/v3/ticker/24hr"
 
-# Waɗannan za su kasance koyaushe ana dubansu
+# Always scan these coins
 CORE_COINS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -10,14 +11,14 @@ CORE_COINS = [
     "SOLUSDT"
 ]
 
-# Coins da kai ka fi son a riƙa dubawa
+# Your favorite coins
 FAVORITE_COINS = [
     "SUIUSDT",
     "SEIUSDT",
     "NOTUSDT"
 ]
 
-# Coins da ba ma son scanner ya bincika
+# Coins to ignore
 BLACKLIST = [
     "USDCUSDT",
     "FDUSDUSDT",
@@ -26,21 +27,33 @@ BLACKLIST = [
 ]
 
 
+def download_market():
+
+    for url in (PRIMARY_URL, FALLBACK_URL):
+
+        try:
+
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+
+            return response.json()
+
+        except Exception:
+            continue
+
+    raise Exception("Unable to fetch Binance market data.")
+
+
 def get_watchlist(limit=30):
 
-    response = requests.get(BINANCE_TICKER, timeout=10)
-    response.raise_for_status()
+    data = download_market()
 
-    data = response.json()
-
-    # USDT pairs kawai
     usdt_pairs = [
         coin for coin in data
         if coin["symbol"].endswith("USDT")
         and coin["symbol"] not in BLACKLIST
     ]
 
-    # Sort by Quote Volume
     usdt_pairs.sort(
         key=lambda x: float(x["quoteVolume"]),
         reverse=True
@@ -61,13 +74,6 @@ def get_watchlist(limit=30):
         if len(dynamic) >= limit:
             break
 
-    watchlist = []
+    watchlist = CORE_COINS + FAVORITE_COINS + dynamic
 
-    watchlist.extend(CORE_COINS)
-    watchlist.extend(FAVORITE_COINS)
-    watchlist.extend(dynamic)
-
-    # Cire duplicates
-    watchlist = list(dict.fromkeys(watchlist))
-
-    return watchlist
+    return list(dict.fromkeys(watchlist))
