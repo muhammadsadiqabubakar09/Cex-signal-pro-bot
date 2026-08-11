@@ -1,12 +1,13 @@
 import requests
 import pandas as pd
 
-BASE_URL = "https://api.binance.com/api/v3/klines"
+PRIMARY_URL = "https://data-api.binance.vision/api/v3/klines"
+FALLBACK_URL = "https://api.binance.com/api/v3/klines"
 
 
 def get_candles(symbol, interval="15m", limit=200):
     """
-    Fetch candlestick (OHLCV) data from Binance
+    Fetch OHLCV candle data from Binance with automatic fallback.
     """
 
     params = {
@@ -15,13 +16,32 @@ def get_candles(symbol, interval="15m", limit=200):
         "limit": limit
     }
 
-    response = requests.get(BASE_URL, params=params, timeout=10)
-    response.raise_for_status()
+    data = None
 
-    data = response.json()
+    for url in [PRIMARY_URL, FALLBACK_URL]:
+
+        try:
+
+            response = requests.get(
+                url,
+                params=params,
+                timeout=10
+            )
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            if data:
+                break
+
+        except Exception:
+            continue
 
     if not data:
-        raise ValueError(f"No candle data returned for {symbol}")
+        raise Exception(
+            f"Unable to download candle data for {symbol}"
+        )
 
     df = pd.DataFrame(data, columns=[
         "time",
