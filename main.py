@@ -1,4 +1,5 @@
 import os
+import traceback
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -15,9 +16,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Start command.
-    """
 
     await update.message.reply_text(
         "✅ CEX Signal Pro Bot is Online.\n\n"
@@ -27,9 +25,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Scan market and send signals.
-    """
 
     await update.message.reply_text(
         "🔍 Scanning market...\nPlease wait..."
@@ -54,18 +49,16 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         log_info(f"Market scan completed. {len(results)} signal(s) sent.")
 
-    except Exception as e:
+    except Exception:
 
-    import traceback
+        error = traceback.format_exc()
 
-    error = traceback.format_exc()
+        log_error(error)
 
-    log_error(error)
-
-    await update.message.reply_text(
-        f"<pre>{error}</pre>",
-        parse_mode=ParseMode.HTML
-    )
+        await update.message.reply_text(
+            f"<pre>{error}</pre>",
+            parse_mode=ParseMode.HTML
+        )
 
 
 def main():
