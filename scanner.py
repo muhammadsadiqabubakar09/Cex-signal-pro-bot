@@ -3,11 +3,14 @@ from multi_timeframe import analyze_symbol
 from signals import generate_signal
 from risk_manager import calculate_trade
 from formatter import format_signal
+from logger import log_info, log_error
+
+import traceback
 
 
 def scan_symbol(symbol):
     """
-    Scan a single symbol and return formatted signal.
+    Scan a single symbol and return a formatted signal.
     """
 
     mtf_data = analyze_symbol(symbol)
@@ -32,13 +35,11 @@ def scan_symbol(symbol):
     if not risk_data:
         return None
 
-    message = format_signal(
+    return format_signal(
         symbol,
         signal_data,
         risk_data
     )
-
-    return message
 
 
 def scan_market():
@@ -48,7 +49,9 @@ def scan_market():
 
     watchlist = get_watchlist()
 
-    signals = []
+    results = []
+
+    log_info(f"Scanning {len(watchlist)} symbols...")
 
     for symbol in watchlist:
 
@@ -57,10 +60,17 @@ def scan_market():
             message = scan_symbol(symbol)
 
             if message:
-                signals.append(message)
+                results.append(message)
 
-        except Exception as e:
+        except Exception:
 
-            print(f"{symbol}: {e}")
+            log_error(
+                f"Error while scanning {symbol}\n"
+                + traceback.format_exc()
+            )
 
-    return signals
+    log_info(
+        f"Scan completed. {len(results)} signal(s) found."
+    )
+
+    return results
