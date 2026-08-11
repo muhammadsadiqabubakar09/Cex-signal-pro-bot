@@ -56,11 +56,16 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
 
-        log_error(str(e))
+    import traceback
 
-        await update.message.reply_text(
-            "❌ An unexpected error occurred while scanning."
-        )
+    error = traceback.format_exc()
+
+    log_error(error)
+
+    await update.message.reply_text(
+        f"<pre>{error}</pre>",
+        parse_mode=ParseMode.HTML
+    )
 
 
 def main():
