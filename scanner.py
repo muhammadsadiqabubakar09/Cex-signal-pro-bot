@@ -7,10 +7,13 @@ from logger import log_info, log_error
 
 import traceback
 
+# Prevent duplicate signals
+SENT_SIGNALS = set()
+
 
 def scan_symbol(symbol):
     """
-    Scan a single symbol and return a formatted signal.
+    Scan a single symbol and return formatted signal.
     """
 
     mtf_data = analyze_symbol(symbol)
@@ -35,16 +38,25 @@ def scan_symbol(symbol):
     if not risk_data:
         return None
 
-    return format_signal(
+    message = format_signal(
         symbol,
         signal_data,
         risk_data
     )
 
+    signal_id = (
+        symbol,
+        signal_data["direction"],
+        round(price, 6)
+    )
+
+    return signal_id, message
+
 
 def scan_market():
     """
-    Scan all watchlist coins.
+    Manual scan.
+    Returns only new signals.
     """
 
     watchlist = get_watchlist()
@@ -57,10 +69,19 @@ def scan_market():
 
         try:
 
-            message = scan_symbol(symbol)
+            result = scan_symbol(symbol)
 
-            if message:
-                results.append(message)
+            if result is None:
+                continue
+
+            signal_id, message = result
+
+            if signal_id in SENT_SIGNALS:
+                continue
+
+            SENT_SIGNALS.add(signal_id)
+
+            results.append(message)
 
         except Exception:
 
@@ -70,7 +91,15 @@ def scan_market():
             )
 
     log_info(
-        f"Scan completed. {len(results)} signal(s) found."
+        f"Scan completed. {len(results)} new signal(s)."
     )
 
     return results
+
+
+def auto_scan():
+    """
+    Auto scan every 5 minutes.
+    """
+
+    return scan_market()
