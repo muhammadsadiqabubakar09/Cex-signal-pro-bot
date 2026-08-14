@@ -1,88 +1,170 @@
 from binance_api import get_candles
 from indicators import add_indicators
+from smc import analyze_smc
 
-Multi-Timeframe Analysis
 
-TIMEFRAMES = ["5m", "15m", "1h", "4h"]
+# ============================================================
+# TIMEFRAMES
+# ============================================================
+
+TIMEFRAMES = [
+    "5m",
+    "15m",
+    "1h",
+    "4h",
+    "1d"
+]
+
+
+# ============================================================
+# ANALYZE ONE TIMEFRAME
+# ============================================================
 
 def analyze_timeframe(symbol, interval):
-"""
-Analyze one timeframe and return all indicators.
-"""
+    """
+    Analyze one timeframe.
 
-try:  
-    df = get_candles(symbol, interval)  
+    Returns technical indicators + SMC data.
+    """
 
-    if df is None or df.empty:  
-        return None  
+    try:
 
-    df = add_indicators(df)  
+        df = get_candles(
+            symbol,
+            interval
+        )
 
-    if df is None or df.empty:  
-        return None  
+        if df is None or df.empty:
+            return None
 
-    last = df.iloc[-1]  
+        # Add technical indicators
+        df = add_indicators(df)
 
-    return {  
+        if df is None or df.empty:
+            return None
 
-        # Price  
-        "close": last["close"],  
+        # Analyze Smart Money Concepts
+        smc_data = analyze_smc(df)
 
-        # EMA  
-        "ema20": last["ema20"],  
-        "ema50": last["ema50"],  
-        "ema200": last["ema200"],  
+        if smc_data is None:
+            return None
 
-        # RSI  
-        "rsi": last["rsi"],  
+        last = df.iloc[-1]
 
-        # Stochastic RSI  
-        "stoch_rsi": last["stoch_rsi"],  
-        "stoch_rsi_k": last["stoch_rsi_k"],  
-        "stoch_rsi_d": last["stoch_rsi_d"],  
+        return {
 
-        # MACD  
-        "macd": last["macd"],  
-        "macd_signal": last["macd_signal"],  
-        "macd_hist": last["macd_hist"],  
+            # ==================================================
+            # PRICE
+            # ==================================================
 
-        # ADX  
-        "adx": last["adx"],  
+            "close": float(last["close"]),
 
-        # ATR  
-        "atr": last["atr"],  
+            # ==================================================
+            # EMA
+            # ==================================================
 
-        # Bollinger Bands  
-        "bb_upper": last["bb_upper"],  
-        "bb_middle": last["bb_middle"],  
-        "bb_lower": last["bb_lower"],  
-        "bb_width": last["bb_width"],  
+            "ema20": float(last["ema20"]),
+            "ema50": float(last["ema50"]),
+            "ema200": float(last["ema200"]),
 
-        # VWAP  
-        "vwap": last["vwap"],  
+            # ==================================================
+            # RSI
+            # ==================================================
 
-        # Volume  
-        "volume": last["volume"],  
-        "volume_sma": last["volume_sma"]  
-    }  
+            "rsi": float(last["rsi"]),
 
-except Exception:  
-    return None
+            # ==================================================
+            # STOCHASTIC RSI
+            # ==================================================
+
+            "stoch_rsi": float(last["stoch_rsi"]),
+            "stoch_rsi_k": float(last["stoch_rsi_k"]),
+            "stoch_rsi_d": float(last["stoch_rsi_d"]),
+
+            # ==================================================
+            # MACD
+            # ==================================================
+
+            "macd": float(last["macd"]),
+            "macd_signal": float(last["macd_signal"]),
+            "macd_hist": float(last["macd_hist"]),
+
+            # ==================================================
+            # ADX
+            # ==================================================
+
+            "adx": float(last["adx"]),
+
+            # ==================================================
+            # ATR
+            # ==================================================
+
+            "atr": float(last["atr"]),
+
+            # ==================================================
+            # BOLLINGER BANDS
+            # ==================================================
+
+            "bb_upper": float(last["bb_upper"]),
+            "bb_middle": float(last["bb_middle"]),
+            "bb_lower": float(last["bb_lower"]),
+            "bb_width": float(last["bb_width"]),
+
+            # ==================================================
+            # VWAP
+            # ==================================================
+
+            "vwap": float(last["vwap"]),
+
+            # ==================================================
+            # VOLUME
+            # ==================================================
+
+            "volume": float(last["volume"]),
+            "volume_sma": float(last["volume_sma"]),
+
+            # ==================================================
+            # SMART MONEY CONCEPTS
+            # ==================================================
+
+            "smc": smc_data
+
+        }
+
+    except Exception:
+        return None
+
+
+# ============================================================
+# ANALYZE ALL TIMEFRAMES
+# ============================================================
 
 def analyze_symbol(symbol):
-"""
-Analyze all timeframes.
-"""
+    """
+    Analyze all configured timeframes.
 
-result = {}  
+    Returns:
+        {
+            "5m": {...},
+            "15m": {...},
+            "1h": {...},
+            "4h": {...},
+            "1d": {...}
+        }
+    """
 
-for timeframe in TIMEFRAMES:  
+    result = {}
 
-    data = analyze_timeframe(symbol, timeframe)  
+    for timeframe in TIMEFRAMES:
 
-    if data is None:  
-        return None  
+        data = analyze_timeframe(
+            symbol,
+            timeframe
+        )
 
-    result[timeframe] = data  
+        if data is None:
+            return None
 
-return result
+        result[timeframe] = data
+
+    return result
