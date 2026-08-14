@@ -1,171 +1,439 @@
 from typing import Dict
 
 
+# ============================================================
+# SIGNAL SCORE LIMITS
+# ============================================================
+
+ELITE_SCORE = 90
+STRONG_SCORE = 80
+VALID_SCORE = 70
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def get_smc(tf_data: Dict) -> Dict:
+    """
+    Safely return SMC data from a timeframe.
+    """
+
+    return tf_data.get("smc", {}) or {}
+
+
+def is_bullish_smc(tf_data: Dict) -> bool:
+    """
+    Check whether SMC gives bullish confirmation.
+    """
+
+    smc = get_smc(tf_data)
+
+    bullish_items = 0
+
+    if smc.get("structure") == "BULLISH":
+        bullish_items += 1
+
+    if smc.get("bos") == "BULLISH":
+        bullish_items += 1
+
+    if smc.get("choch") == "BULLISH":
+        bullish_items += 1
+
+    if smc.get("liquidity_sweep") == "BULLISH":
+        bullish_items += 1
+
+    fvg = smc.get("fvg", {})
+    if fvg.get("type") == "BULLISH":
+        bullish_items += 1
+
+    order_block = smc.get("order_block", {})
+    if order_block.get("type") == "BULLISH":
+        bullish_items += 1
+
+    return bullish_items >= 2
+
+
+def is_bearish_smc(tf_data: Dict) -> bool:
+    """
+    Check whether SMC gives bearish confirmation.
+    """
+
+    smc = get_smc(tf_data)
+
+    bearish_items = 0
+
+    if smc.get("structure") == "BEARISH":
+        bearish_items += 1
+
+    if smc.get("bos") == "BEARISH":
+        bearish_items += 1
+
+    if smc.get("choch") == "BEARISH":
+        bearish_items += 1
+
+    if smc.get("liquidity_sweep") == "BEARISH":
+        bearish_items += 1
+
+    fvg = smc.get("fvg", {})
+    if fvg.get("type") == "BEARISH":
+        bearish_items += 1
+
+    order_block = smc.get("order_block", {})
+    if order_block.get("type") == "BEARISH":
+        bearish_items += 1
+
+    return bearish_items >= 2
+
+
+# ============================================================
+# MAIN SIGNAL GENERATOR
+# ============================================================
+
 def generate_signal(mtf_data: Dict):
     """
-    Professional Multi-Timeframe Signal Generator
+    Professional Multi-Timeframe Signal Generator.
+
+    Timeframe hierarchy:
+
+        1D  -> Macro trend
+        4H  -> Main trend
+        1H  -> Structure
+        15M -> Setup
+        5M  -> Entry confirmation
+
+    Returns a signal dictionary compatible with
+    risk_manager.py and formatter.py.
     """
 
     score = 0
     reasons = []
-
-    tf5 = mtf_data["5m"]
-    tf15 = mtf_data["15m"]
-    tf1h = mtf_data["1h"]
-    tf4h = mtf_data["4h"]
 
     signal = "⚪ NO TRADE"
     market = "NONE"
     direction = "NONE"
     confidence = "LOW"
 
-    # ==========================
-    # TREND (45)
-    # ==========================
+    # ========================================================
+    # VALIDATION
+    # ========================================================
 
-    bullish = (
-        tf4h["ema20"] > tf4h["ema50"] > tf4h["ema200"] and
+    required_timeframes = [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+    ]
+
+    for timeframe in required_timeframes:
+
+        if timeframe not in mtf_data:
+            return {
+                "signal": signal,
+                "market": market,
+                "direction": direction,
+                "score": 0,
+                "confidence": confidence,
+                "reasons": ["Incomplete timeframe data"]
+            }
+
+    tf5 = mtf_data["5m"]
+    tf15 = mtf_data["15m"]
+    tf1h = mtf_data["1h"]
+    tf4h = mtf_data["4h"]
+    tf1d = mtf_data["1d"]
+
+    # ========================================================
+    # MACRO TREND — 1D
+    # ========================================================
+
+    daily_bullish = (
+        tf1d["ema20"] > tf1d["ema50"] > tf1d["ema200"]
+    )
+
+    daily_bearish = (
+        tf1d["ema20"] < tf1d["ema50"] < tf1d["ema200"]
+    )
+
+    # ========================================================
+    # MAIN TREND — 4H + 1H
+    # ========================================================
+
+    bullish_4h = (
+        tf4h["ema20"] > tf4h["ema50"] > tf4h["ema200"]
+    )
+
+    bearish_4h = (
+        tf4h["ema20"] < tf4h["ema50"] < tf4h["ema200"]
+    )
+
+    bullish_1h = (
         tf1h["ema20"] > tf1h["ema50"] > tf1h["ema200"]
     )
 
-    bearish = (
-        tf4h["ema20"] < tf4h["ema50"] < tf4h["ema200"] and
+    bearish_1h = (
         tf1h["ema20"] < tf1h["ema50"] < tf1h["ema200"]
     )
 
-    if bullish:
-        score += 30
-        reasons.append("4H & 1H Bullish Trend")
+    # ========================================================
+    # DETERMINE PRIMARY DIRECTION
+    # ========================================================
 
-    elif bearish:
-        score += 30
-        reasons.append("4H & 1H Bearish Trend")
+    bullish_trend = (
+        daily_bullish
+        and bullish_4h
+        and bullish_1h
+    )
 
-    if bullish and tf15["ema20"] > tf15["ema50"]:
+    bearish_trend = (
+        daily_bearish
+        and bearish_4h
+        and bearish_1h
+    )
+
+    # ========================================================
+    # TREND SCORE — 35 POINTS
+    # ========================================================
+
+    if bullish_trend:
+
+        score += 15
+        reasons.append("1D Bullish Macro Trend")
+
         score += 10
-        reasons.append("15M Bullish Confirmation")
+        reasons.append("4H Bullish Trend")
 
-    elif bearish and tf15["ema20"] < tf15["ema50"]:
         score += 10
-        reasons.append("15M Bearish Confirmation")
+        reasons.append("1H Bullish Trend")
 
-    if bullish and tf5["ema20"] > tf5["ema50"]:
-        score += 5
-        reasons.append("5M Entry")
+    elif bearish_trend:
 
-    elif bearish and tf5["ema20"] < tf5["ema50"]:
-        score += 5
-        reasons.append("5M Entry")
+        score += 15
+        reasons.append("1D Bearish Macro Trend")
 
-    # ==========================
-    # MOMENTUM (35)
-    # ==========================
+        score += 10
+        reasons.append("4H Bearish Trend")
 
-    if bullish:
+        score += 10
+        reasons.append("1H Bearish Trend")
 
-        if 55 <= tf5["rsi"] <= 70:
-            score += 8
-            reasons.append("Healthy RSI")
+    # ========================================================
+    # 15M SETUP — 15 POINTS
+    # ========================================================
+
+    bullish_15m = tf15["ema20"] > tf15["ema50"]
+    bearish_15m = tf15["ema20"] < tf15["ema50"]
+
+    if bullish_trend and bullish_15m:
+
+        score += 8
+        reasons.append("15M Bullish Setup")
+
+    elif bearish_trend and bearish_15m:
+
+        score += 8
+        reasons.append("15M Bearish Setup")
+
+    # ========================================================
+    # 5M ENTRY TREND — 5 POINTS
+    # ========================================================
+
+    bullish_5m = tf5["ema20"] > tf5["ema50"]
+    bearish_5m = tf5["ema20"] < tf5["ema50"]
+
+    if bullish_trend and bullish_5m:
+
+        score += 7
+        reasons.append("5M Bullish Entry Trend")
+
+    elif bearish_trend and bearish_5m:
+
+        score += 7
+        reasons.append("5M Bearish Entry Trend")
+
+    # ========================================================
+    # SMC — 20 POINTS
+    # ========================================================
+
+    if bullish_trend:
+
+        if is_bullish_smc(tf4h):
+            score += 5
+            reasons.append("4H Bullish SMC Confirmation")
+
+        if is_bullish_smc(tf1h):
+            score += 5
+            reasons.append("1H Bullish SMC Confirmation")
+
+        if is_bullish_smc(tf15):
+            score += 5
+            reasons.append("15M Bullish SMC Setup")
+
+        if is_bullish_smc(tf5):
+            score += 5
+            reasons.append("5M Bullish SMC Confirmation")
+
+    elif bearish_trend:
+
+        if is_bearish_smc(tf4h):
+            score += 5
+            reasons.append("4H Bearish SMC Confirmation")
+
+        if is_bearish_smc(tf1h):
+            score += 5
+            reasons.append("1H Bearish SMC Confirmation")
+
+        if is_bearish_smc(tf15):
+            score += 5
+            reasons.append("15M Bearish SMC Setup")
+
+        if is_bearish_smc(tf5):
+            score += 5
+            reasons.append("5M Bearish SMC Confirmation")
+
+    # ========================================================
+    # MOMENTUM — 15 POINTS
+    # ========================================================
+
+    if bullish_trend:
+
+        if 50 <= tf5["rsi"] <= 70:
+            score += 4
+            reasons.append("Healthy Bullish RSI")
 
         if tf5["macd"] > tf5["macd_signal"]:
-            score += 8
+            score += 4
             reasons.append("Bullish MACD")
 
         if tf5["macd_hist"] > 0:
-            score += 4
+            score += 2
             reasons.append("Positive MACD Histogram")
 
         if tf5["stoch_rsi_k"] > tf5["stoch_rsi_d"]:
-            score += 5
-            reasons.append("Stoch RSI Confirmation")
+            score += 2
+            reasons.append("Bullish Stoch RSI")
 
-    elif bearish:
+    elif bearish_trend:
 
-        if 30 <= tf5["rsi"] <= 45:
-            score += 8
-            reasons.append("Bearish RSI")
+        if 30 <= tf5["rsi"] <= 50:
+            score += 4
+            reasons.append("Healthy Bearish RSI")
 
         if tf5["macd"] < tf5["macd_signal"]:
-            score += 8
+            score += 4
             reasons.append("Bearish MACD")
 
         if tf5["macd_hist"] < 0:
-            score += 4
+            score += 2
             reasons.append("Negative MACD Histogram")
 
         if tf5["stoch_rsi_k"] < tf5["stoch_rsi_d"]:
-            score += 5
-            reasons.append("Stoch RSI Confirmation")
+            score += 2
+            reasons.append("Bearish Stoch RSI")
+
+    # ========================================================
+    # MARKET CONFIRMATION — 10 POINTS
+    # ========================================================
 
     if tf5["adx"] >= 25:
-        score += 10
+
+        score += 4
         reasons.append("Strong ADX")
 
-    # ==========================
-    # CONFIRMATION (20)
-    # ==========================
-
     if tf5["volume"] > tf5["volume_sma"]:
-        score += 5
-        reasons.append("High Volume")
 
-    if bullish and tf5["close"] > tf5["vwap"]:
-        score += 5
-        reasons.append("Above VWAP")
+        score += 3
+        reasons.append("Above Average Volume")
 
-    elif bearish and tf5["close"] < tf5["vwap"]:
-        score += 5
-        reasons.append("Below VWAP")
+    if bullish_trend and tf5["close"] > tf5["vwap"]:
 
-    if bullish and tf5["close"] > tf5["bb_middle"]:
-        score += 5
-        reasons.append("Above Bollinger")
+        score += 3
+        reasons.append("Price Above VWAP")
 
-    elif bearish and tf5["close"] < tf5["bb_middle"]:
-        score += 5
-        reasons.append("Below Bollinger")
+    elif bearish_trend and tf5["close"] < tf5["vwap"]:
 
-    if tf5["atr"] > 0:
-        score += 5
-        reasons.append("ATR Confirmed")
+        score += 3
+        reasons.append("Price Below VWAP")
 
-    # ==========================
-    # FINAL DECISION
-    # ==========================
+    # ========================================================
+    # FINAL SCORE CAP
+    # ========================================================
 
-    if bullish:
+    score = min(score, 100)
 
-        if score >= 95:
+    # ========================================================
+    # FINAL DECISION — LONG
+    # ========================================================
+
+    if bullish_trend:
+
+        if score >= ELITE_SCORE:
+
             signal = "🔥 ELITE LONG"
             market = "FUTURES"
             direction = "LONG"
             confidence = "VERY HIGH"
 
-        elif score >= 90:
+        elif score >= STRONG_SCORE:
+
             signal = "🟢 STRONG LONG"
             market = "FUTURES"
             direction = "LONG"
             confidence = "HIGH"
 
-        elif score >= 80:
+        elif score >= VALID_SCORE:
+
             signal = "🟢 BUY"
             market = "SPOT"
             direction = "BUY"
             confidence = "MEDIUM"
 
-    elif bearish:
+    # ========================================================
+    # FINAL DECISION — SHORT
+    # ========================================================
 
-        if score >= 95:
+    elif bearish_trend:
+
+        if score >= ELITE_SCORE:
+
             signal = "🔥 ELITE SHORT"
             market = "FUTURES"
             direction = "SHORT"
             confidence = "VERY HIGH"
 
-        elif score >= 90:
+        elif score >= STRONG_SCORE:
+
             signal = "🔴 STRONG SHORT"
             market = "FUTURES"
             direction = "SHORT"
             confidence = "HIGH"
+
+        elif score >= VALID_SCORE:
+
+            signal = "🔴 SELL"
+            market = "SPOT"
+            direction = "SELL"
+            confidence = "MEDIUM"
+
+    # ========================================================
+    # SAFETY FILTER
+    # ========================================================
+
+    if direction == "NONE":
+
+        return {
+            "signal": "⚪ NO TRADE",
+            "market": "NONE",
+            "direction": "NONE",
+            "score": score,
+            "confidence": "LOW",
+            "reasons": reasons
+        }
+
+    # ========================================================
+    # RETURN
+    # ========================================================
 
     return {
         "signal": signal,
