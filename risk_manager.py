@@ -1,106 +1,172 @@
 from typing import Dict
 
-def calculate_trade(price: float, atr: float, signal_data: Dict):
-"""
-Calculate Entry, Stop Loss, Take Profit,
-Risk/Reward and Suggested Leverage.
-"""
 
-# =========================  
-# VALIDATION  
-# =========================  
+# ============================================================
+# RISK CONFIGURATION
+# ============================================================
 
-if price <= 0:  
-    return {}  
+SL_ATR_MULTIPLIER = 1.5
 
-if atr <= 0:  
-    return {}  
+TP1_RR = 1.5
+TP2_RR = 2.5
+TP3_RR = 4.0
 
-direction = signal_data["direction"]  
-market = signal_data["market"]  
-confidence = signal_data["confidence"]  
+MIN_RISK_REWARD = 1.5
 
-if direction == "NONE":  
-    return {}  
 
-# =========================  
-# STOP LOSS & TAKE PROFIT  
-# =========================  
+# ============================================================
+# MAIN TRADE CALCULATOR
+# ============================================================
 
-if direction in ["BUY", "LONG"]:  
+def calculate_trade(
+    price: float,
+    atr: float,
+    signal_data: Dict
+):
+    """
+    Calculate Entry, Stop Loss, Take Profit,
+    Risk/Reward and Suggested Leverage.
 
-    stop_loss = price - (1.5 * atr)  
+    This function is compatible with the output
+    produced by signals.py.
+    """
 
-    tp1 = price + (2 * atr)  
-    tp2 = price + (3 * atr)  
-    tp3 = price + (4 * atr)  
+    # ========================================================
+    # VALIDATION
+    # ========================================================
 
-elif direction == "SHORT":  
+    if price <= 0:
+        return {}
 
-    stop_loss = price + (1.5 * atr)  
+    if atr <= 0:
+        return {}
 
-    tp1 = price - (2 * atr)  
-    tp2 = price - (3 * atr)  
-    tp3 = price - (4 * atr)  
+    direction = signal_data.get("direction")
+    market = signal_data.get("market")
+    confidence = signal_data.get("confidence")
 
-else:  
-    return {}  
+    if direction not in ["BUY", "LONG", "SHORT"]:
+        return {}
 
-# =========================  
-# RISK CALCULATION  
-# =========================  
+    if market not in ["SPOT", "FUTURES"]:
+        return {}
 
-risk = abs(price - stop_loss)  
-reward = abs(tp2 - price)  
+    # ========================================================
+    # ENTRY
+    # ========================================================
 
-risk_percent = round((risk / price) * 100, 2)  
-reward_percent = round((reward / price) * 100, 2)  
+    entry = float(price)
 
-risk_reward = round(reward / risk, 2)  
+    # ========================================================
+    # STOP LOSS
+    # ========================================================
 
-# =========================  
-# LEVERAGE  
-# =========================  
+    risk_distance = atr * SL_ATR_MULTIPLIER
 
-if market == "SPOT":  
-    leverage = "None"  
+    if direction in ["BUY", "LONG"]:
 
-else:  
+        stop_loss = entry - risk_distance
 
-    if confidence == "VERY HIGH":  
-        leverage = "5x"  
+    elif direction == "SHORT":
 
-    elif confidence == "HIGH":  
-        leverage = "3x"  
+        stop_loss = entry + risk_distance
 
-    elif confidence == "MEDIUM":  
-        leverage = "2x"  
+    else:
+        return {}
 
-    else:  
-        leverage = "None"  
+    # ========================================================
+    # RISK
+    # ========================================================
 
-# =========================  
-# RETURN  
-# =========================  
+    risk = abs(entry - stop_loss)
 
-return {  
+    if risk <= 0:
+        return {}
 
-    "market": market,  
+    # ========================================================
+    # TAKE PROFITS
+    # ========================================================
 
-    "direction": direction,  
+    if direction in ["BUY", "LONG"]:
 
-    "entry": round(price, 6),  
+        tp1 = entry + (risk * TP1_RR)
+        tp2 = entry + (risk * TP2_RR)
+        tp3 = entry + (risk * TP3_RR)
 
-    "stop_loss": round(stop_loss, 6),  
+    elif direction == "SHORT":
 
-    "tp1": round(tp1, 6),  
-    "tp2": round(tp2, 6),  
-    "tp3": round(tp3, 6),  
+        tp1 = entry - (risk * TP1_RR)
+        tp2 = entry - (risk * TP2_RR)
+        tp3 = entry - (risk * TP3_RR)
 
-    "risk_percent": risk_percent,  
-    "reward_percent": reward_percent,  
+    else:
+        return {}
 
-    "risk_reward": risk_reward,  
+    # ========================================================
+    # RISK / REWARD
+    # ========================================================
 
-    "suggested_leverage": leverage  
-}
+    reward = abs(tp2 - entry)
+
+    if reward <= 0:
+        return {}
+
+    risk_reward = reward / risk
+
+    if risk_reward < MIN_RISK_REWARD:
+        return {}
+
+    risk_percent = (risk / entry) * 100
+
+    reward_percent = (reward / entry) * 100
+
+    # ========================================================
+    # LEVERAGE
+    # ========================================================
+
+    if market == "SPOT":
+
+        leverage = "None"
+
+    elif confidence == "VERY HIGH":
+
+        leverage = "5x"
+
+    elif confidence == "HIGH":
+
+        leverage = "3x"
+
+    elif confidence == "MEDIUM":
+
+        leverage = "2x"
+
+    else:
+
+        leverage = "None"
+
+    # ========================================================
+    # RETURN
+    # ========================================================
+
+    return {
+
+        "market": market,
+
+        "direction": direction,
+
+        "entry": round(entry, 8),
+
+        "stop_loss": round(stop_loss, 8),
+
+        "tp1": round(tp1, 8),
+        "tp2": round(tp2, 8),
+        "tp3": round(tp3, 8),
+
+        "risk_percent": round(risk_percent, 2),
+
+        "reward_percent": round(reward_percent, 2),
+
+        "risk_reward": round(risk_reward, 2),
+
+        "suggested_leverage": leverage
+    }
