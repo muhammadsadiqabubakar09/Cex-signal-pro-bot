@@ -134,15 +134,22 @@ def scan_symbol(symbol):
     # --------------------------------------------------------
 
     signal_data = generate_signal(
-        mtf_data
-    )
+    mtf_data
+)
 
-    if not signal_data:
-        return None
+if not signal_data:
+    return None
 
-    if signal_data["direction"] == "NONE":
-        return None
+log_info(
+    f"{symbol} | "
+    f"Score={signal_data['score']} | "
+    f"Direction={signal_data['direction']} | "
+    f"Signal={signal_data['signal']}"
+)
 
+if signal_data["direction"] == "NONE":
+    return None
+       
     # --------------------------------------------------------
     # Current 5M price and ATR
     # --------------------------------------------------------
