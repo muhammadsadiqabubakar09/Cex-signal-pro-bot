@@ -3,7 +3,11 @@ import requests
 PRIMARY_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
 FALLBACK_URL = "https://api.binance.com/api/v3/ticker/24hr"
 
-# Always scan these coins
+
+# ==========================================
+# ALWAYS SCAN
+# ==========================================
+
 CORE_COINS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -11,29 +15,69 @@ CORE_COINS = [
     "SOLUSDT"
 ]
 
-# Your favorite coins
+
+# ==========================================
+# FAVORITES
+# ==========================================
+
 FAVORITE_COINS = [
     "SUIUSDT",
     "SEIUSDT",
-    "NOTUSDT"
+    "NOTUSDT",
+    "LINKUSDT",
+    "ARBUSDT",
+    "APTUSDT"
 ]
 
-# Coins to ignore
-BLACKLIST = [
+
+# ==========================================
+# BLACKLIST
+# ==========================================
+
+BLACKLIST = {
+
+    # Stablecoins
     "USDCUSDT",
     "FDUSDUSDT",
     "TUSDUSDT",
-    "BUSDUSDT"
-]
+    "BUSDUSDT",
+
+    # Fiat pairs
+    "EURUSDT",
+    "EURIUSDT",
+    "AEURUSDT",
+    "TRYUSDT",
+    "BRLUSDT",
+    "RUBUSDT",
+    "UAHUSDT",
+    "BIDRUSDT",
+
+}
+
+
+# Ignore leveraged tokens
+IGNORE_SUFFIX = (
+    "UPUSDT",
+    "DOWNUSDT",
+    "BULLUSDT",
+    "BEARUSDT"
+)
 
 
 def download_market():
 
-    for url in (PRIMARY_URL, FALLBACK_URL):
+    for url in (
+        PRIMARY_URL,
+        FALLBACK_URL
+    ):
 
         try:
 
-            response = requests.get(url, timeout=10)
+            response = requests.get(
+                url,
+                timeout=10
+            )
+
             response.raise_for_status()
 
             return response.json()
@@ -41,39 +85,99 @@ def download_market():
         except Exception:
             continue
 
-    raise Exception("Unable to fetch Binance market data.")
+    raise Exception(
+        "Unable to fetch Binance market data."
+    )
 
 
-def get_watchlist(limit=30):
+def is_good_coin(symbol):
+
+    if not symbol.endswith("USDT"):
+        return False
+
+    if symbol in BLACKLIST:
+        return False
+
+    for suffix in IGNORE_SUFFIX:
+
+        if symbol.endswith(suffix):
+            return False
+
+    return True
+
+
+def get_watchlist(limit=35):
 
     data = download_market()
 
-    usdt_pairs = [
-        coin for coin in data
-        if coin["symbol"].endswith("USDT")
-        and coin["symbol"] not in BLACKLIST
-    ]
+    usdt_pairs = []
+
+    for coin in data:
+
+        symbol = coin["symbol"]
+
+        if not is_good_coin(symbol):
+            continue
+
+        try:
+
+            volume = float(
+                coin["quoteVolume"]
+            )
+
+            change = abs(
+                float(
+                    coin["priceChangePercent"]
+                )
+            )
+
+        except Exception:
+            continue
+
+        # ===========================
+        # QUALITY FILTER
+        # ===========================
+
+        if volume < 10_000_000:
+            continue
+
+        score = volume + (
+            change * 2_000_000
+        )
+
+        usdt_pairs.append(
+            (
+                score,
+                symbol
+            )
+        )
 
     usdt_pairs.sort(
-        key=lambda x: float(x["quoteVolume"]),
         reverse=True
     )
 
     dynamic = []
 
-    for coin in usdt_pairs:
-
-        symbol = coin["symbol"]
+    for _, symbol in usdt_pairs:
 
         if (
             symbol not in CORE_COINS
             and symbol not in FAVORITE_COINS
         ):
+
             dynamic.append(symbol)
 
         if len(dynamic) >= limit:
             break
 
-    watchlist = CORE_COINS + FAVORITE_COINS + dynamic
+    watchlist = (
+        CORE_COINS
+        + FAVORITE_COINS
+        + dynamic
+    )
 
-    return list(dict.fromkeys(watchlist))
+    watchlist = list(
+        dict.fromkeys(watchlist)
+    )
+
+    return watchlist
