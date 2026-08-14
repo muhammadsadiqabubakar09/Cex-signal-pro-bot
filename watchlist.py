@@ -1,12 +1,17 @@
 import requests
 
+
+# ============================================================
+# BINANCE MARKET DATA
+# ============================================================
+
 PRIMARY_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
 FALLBACK_URL = "https://api.binance.com/api/v3/ticker/24hr"
 
 
-# ==========================================
-# ALWAYS SCAN
-# ==========================================
+# ============================================================
+# WATCHLIST CONFIGURATION
+# ============================================================
 
 CORE_COINS = [
     "BTCUSDT",
@@ -15,10 +20,6 @@ CORE_COINS = [
     "SOLUSDT"
 ]
 
-
-# ==========================================
-# FAVORITES
-# ==========================================
 
 FAVORITE_COINS = [
     "SUIUSDT",
@@ -30,9 +31,9 @@ FAVORITE_COINS = [
 ]
 
 
-# ==========================================
+# ============================================================
 # BLACKLIST
-# ==========================================
+# ============================================================
 
 BLACKLIST = {
 
@@ -51,11 +52,13 @@ BLACKLIST = {
     "RUBUSDT",
     "UAHUSDT",
     "BIDRUSDT",
-
 }
 
 
-# Ignore leveraged tokens
+# ============================================================
+# LEVERAGED TOKENS
+# ============================================================
+
 IGNORE_SUFFIX = (
     "UPUSDT",
     "DOWNUSDT",
@@ -63,6 +66,21 @@ IGNORE_SUFFIX = (
     "BEARUSDT"
 )
 
+
+# ============================================================
+# FILTER SETTINGS
+# ============================================================
+
+MIN_QUOTE_VOLUME = 5_000_000
+
+MIN_PRICE_CHANGE = 1.0
+
+MAX_DYNAMIC_COINS = 35
+
+
+# ============================================================
+# DOWNLOAD MARKET DATA
+# ============================================================
 
 def download_market():
 
@@ -80,7 +98,10 @@ def download_market():
 
             response.raise_for_status()
 
-            return response.json()
+            data = response.json()
+
+            if isinstance(data, list) and data:
+                return data
 
         except Exception:
             continue
@@ -89,6 +110,10 @@ def download_market():
         "Unable to fetch Binance market data."
     )
 
+
+# ============================================================
+# BASIC COIN FILTER
+# ============================================================
 
 def is_good_coin(symbol):
 
@@ -106,76 +131,142 @@ def is_good_coin(symbol):
     return True
 
 
-def get_watchlist(limit=35):
+# ============================================================
+# COIN QUALITY SCORE
+# ============================================================
 
-    data = download_market()
+def calculate_coin_score(volume, change):
 
-    usdt_pairs = []
+    """
+    Rank coins using:
+        - Trading volume
+        - Volatility
+
+    NOTE:
+    Binance 24hr ticker does not provide market cap.
+    Therefore this is NOT an actual market-cap ranking.
+    """
+
+    volume_score = min(
+        volume / 10_000_000,
+        100
+    )
+
+    volatility_score = min(
+        change * 5,
+        50
+    )
+
+    return (
+        volume_score * 0.70
+        + volatility_score * 0.30
+    )
+
+
+# ============================================================
+# BUILD DYNAMIC WATCHLIST
+# ============================================================
+
+def get_dynamic_coins(data, limit=MAX_DYNAMIC_COINS):
+
+    candidates = []
 
     for coin in data:
 
-        symbol = coin["symbol"]
+        symbol = coin.get("symbol")
+
+        if not symbol:
+            continue
 
         if not is_good_coin(symbol):
+            continue
+
+        # Do not duplicate core/favorite coins
+        if symbol in CORE_COINS:
+            continue
+
+        if symbol in FAVORITE_COINS:
             continue
 
         try:
 
             volume = float(
-                coin["quoteVolume"]
+                coin.get("quoteVolume", 0)
             )
 
             change = abs(
                 float(
-                    coin["priceChangePercent"]
+                    coin.get(
+                        "priceChangePercent",
+                        0
+                    )
                 )
             )
 
-        except Exception:
+        except (TypeError, ValueError):
+
             continue
 
-        # ===========================
-        # QUALITY FILTER
-        # ===========================
+        # ====================================================
+        # LIQUIDITY FILTER
+        # ====================================================
 
-        if volume < 10_000_000:
+        if volume < MIN_QUOTE_VOLUME:
             continue
 
-        score = volume + (
-            change * 2_000_000
+        # ====================================================
+        # ACTIVITY FILTER
+        # ====================================================
+
+        if change < MIN_PRICE_CHANGE:
+            continue
+
+        score = calculate_coin_score(
+            volume,
+            change
         )
 
-        usdt_pairs.append(
-            (
-                score,
-                symbol
-            )
+        candidates.append(
+            {
+                "symbol": symbol,
+                "score": score,
+                "volume": volume,
+                "change": change
+            }
         )
 
-    usdt_pairs.sort(
+    # Highest quality first
+    candidates.sort(
+        key=lambda item: item["score"],
         reverse=True
     )
 
-    dynamic = []
+    return [
+        item["symbol"]
+        for item in candidates[:limit]
+    ]
 
-    for _, symbol in usdt_pairs:
 
-        if (
-            symbol not in CORE_COINS
-            and symbol not in FAVORITE_COINS
-        ):
+# ============================================================
+# FINAL WATCHLIST
+# ============================================================
 
-            dynamic.append(symbol)
+def get_watchlist(limit=MAX_DYNAMIC_COINS):
 
-        if len(dynamic) >= limit:
-            break
+    data = download_market()
+
+    dynamic_coins = get_dynamic_coins(
+        data,
+        limit=limit
+    )
 
     watchlist = (
         CORE_COINS
         + FAVORITE_COINS
-        + dynamic
+        + dynamic_coins
     )
 
+    # Remove duplicates while preserving order
     watchlist = list(
         dict.fromkeys(watchlist)
     )
