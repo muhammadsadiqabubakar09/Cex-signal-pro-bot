@@ -411,10 +411,11 @@ def generate_signal(mtf_data: Dict):
 
         elif score >= VALID_SCORE:
 
-            signal = "⚪ NO TRADE"
-            market = "NONE"
-            direction = "NONE"
-            confidence = "LOW"
+            signal = "🔴 SELL"
+            market = "SPOT"
+            direction = "SELL"
+            confidence = "MEDIUM"
+            
     # ========================================================
     # SAFETY FILTER
     # ========================================================
