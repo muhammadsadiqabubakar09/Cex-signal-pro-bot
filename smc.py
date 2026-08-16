@@ -12,17 +12,46 @@ FVG_MIN_SIZE_ATR = 0.10
 
 
 # ============================================================
+# EMPTY SMC RESULT
+# ============================================================
+
+def empty_smc():
+    """
+    Return a safe empty SMC structure.
+
+    This guarantees compatibility with signals.py.
+    """
+
+    return {
+        "structure": "NEUTRAL",
+        "bos": None,
+        "choch": None,
+        "liquidity_sweep": None,
+        "fvg": {
+            "type": None,
+            "upper": None,
+            "lower": None,
+            "size": None
+        },
+        "order_block": {
+            "type": None,
+            "high": None,
+            "low": None
+        }
+    }
+
+
+# ============================================================
 # SWING DETECTION
 # ============================================================
 
-def find_swings(df, left=SWING_LEFT, right=SWING_RIGHT):
+def find_swings(
+    df,
+    left=SWING_LEFT,
+    right=SWING_RIGHT
+):
     """
-    Detect swing highs and swing lows.
-
-    Returns:
-        DataFrame with:
-        - swing_high
-        - swing_low
+    Detect confirmed swing highs and swing lows.
     """
 
     data = df.copy()
@@ -33,22 +62,52 @@ def find_swings(df, left=SWING_LEFT, right=SWING_RIGHT):
     if len(data) < left + right + 1:
         return data
 
-    for i in range(left, len(data) - right):
+    for i in range(
+        left,
+        len(data) - right
+    ):
 
-        current_high = data["high"].iloc[i]
-        current_low = data["low"].iloc[i]
+        current_high = float(
+            data["high"].iloc[i]
+        )
 
-        left_highs = data["high"].iloc[i - left:i]
-        right_highs = data["high"].iloc[i + 1:i + right + 1]
+        current_low = float(
+            data["low"].iloc[i]
+        )
 
-        left_lows = data["low"].iloc[i - left:i]
-        right_lows = data["low"].iloc[i + 1:i + right + 1]
+        left_highs = data["high"].iloc[
+            i - left:i
+        ]
 
-        if current_high > left_highs.max() and current_high > right_highs.max():
-            data.iloc[i, data.columns.get_loc("swing_high")] = True
+        right_highs = data["high"].iloc[
+            i + 1:i + right + 1
+        ]
 
-        if current_low < left_lows.min() and current_low < right_lows.min():
-            data.iloc[i, data.columns.get_loc("swing_low")] = True
+        left_lows = data["low"].iloc[
+            i - left:i
+        ]
+
+        right_lows = data["low"].iloc[
+            i + 1:i + right + 1
+        ]
+
+        if (
+            current_high > left_highs.max()
+            and current_high > right_highs.max()
+        ):
+            data.at[
+                data.index[i],
+                "swing_high"
+            ] = True
+
+        if (
+            current_low < left_lows.min()
+            and current_low < right_lows.min()
+        ):
+            data.at[
+                data.index[i],
+                "swing_low"
+            ] = True
 
     return data
 
@@ -59,71 +118,95 @@ def find_swings(df, left=SWING_LEFT, right=SWING_RIGHT):
 
 def detect_structure(df):
     """
-    Detect basic BOS and CHOCH using confirmed swing points.
-
-    Returns:
-        {
-            "structure": "BULLISH" / "BEARISH" / "NEUTRAL",
-            "bos": "BULLISH" / "BEARISH" / None,
-            "choch": "BULLISH" / "BEARISH" / None
-        }
+    Detect market structure, BOS and CHOCH.
     """
 
     data = find_swings(df)
 
-    swing_highs = data[data["swing_high"]]
-    swing_lows = data[data["swing_low"]]
+    swing_highs = data[
+        data["swing_high"]
+    ]
 
-    if len(swing_highs) < 2 or len(swing_lows) < 2:
+    swing_lows = data[
+        data["swing_low"]
+    ]
+
+    if (
+        len(swing_highs) < 2
+        or len(swing_lows) < 2
+    ):
         return {
             "structure": "NEUTRAL",
             "bos": None,
             "choch": None
         }
 
-    last_close = float(data["close"].iloc[-1])
+    last_close = float(
+        data["close"].iloc[-1]
+    )
 
-    previous_high = float(swing_highs["high"].iloc[-1])
-    previous_low = float(swing_lows["low"].iloc[-1])
+    latest_high = float(
+        swing_highs["high"].iloc[-1]
+    )
 
-    previous_high_before = float(swing_highs["high"].iloc[-2])
-    previous_low_before = float(swing_lows["low"].iloc[-2])
+    previous_high = float(
+        swing_highs["high"].iloc[-2]
+    )
+
+    latest_low = float(
+        swing_lows["low"].iloc[-1]
+    )
+
+    previous_low = float(
+        swing_lows["low"].iloc[-2]
+    )
 
     bullish_structure = (
-        previous_high > previous_high_before
-        and previous_low > previous_low_before
+        latest_high > previous_high
+        and latest_low > previous_low
     )
 
     bearish_structure = (
-        previous_high < previous_high_before
-        and previous_low < previous_low_before
+        latest_high < previous_high
+        and latest_low < previous_low
     )
+
+    if bullish_structure:
+
+        structure = "BULLISH"
+
+    elif bearish_structure:
+
+        structure = "BEARISH"
+
+    else:
+
+        structure = "NEUTRAL"
 
     bos = None
     choch = None
 
-    # Current close breaks latest swing high
-    if last_close > previous_high:
+    # --------------------------------------------------------
+    # Bullish break
+    # --------------------------------------------------------
+
+    if last_close > latest_high:
+
         bos = "BULLISH"
 
         if bearish_structure:
             choch = "BULLISH"
 
-    # Current close breaks latest swing low
-    elif last_close < previous_low:
+    # --------------------------------------------------------
+    # Bearish break
+    # --------------------------------------------------------
+
+    elif last_close < latest_low:
+
         bos = "BEARISH"
 
         if bullish_structure:
             choch = "BEARISH"
-
-    if bullish_structure:
-        structure = "BULLISH"
-
-    elif bearish_structure:
-        structure = "BEARISH"
-
-    else:
-        structure = "NEUTRAL"
 
     return {
         "structure": structure,
@@ -138,52 +221,56 @@ def detect_structure(df):
 
 def detect_liquidity_sweep(df):
     """
-    Detect possible liquidity sweeps around the latest
-    confirmed swing high/low.
-
-    Returns:
-        "BULLISH"
-        "BEARISH"
-        None
+    Detect bullish or bearish liquidity sweep.
     """
 
     data = find_swings(df)
 
-    swing_highs = data[data["swing_high"]]
-    swing_lows = data[data["swing_low"]]
+    swing_highs = data[
+        data["swing_high"]
+    ]
 
-    if swing_highs.empty and swing_lows.empty:
+    swing_lows = data[
+        data["swing_low"]
+    ]
+
+    if (
+        swing_highs.empty
+        and swing_lows.empty
+    ):
         return None
 
     last = data.iloc[-1]
 
     # --------------------------------------------------------
-    # Bearish liquidity sweep:
-    # Price takes previous high but closes back below it.
+    # Bearish sweep
     # --------------------------------------------------------
 
     if not swing_highs.empty:
 
-        last_swing_high = float(swing_highs["high"].iloc[-1])
+        level = float(
+            swing_highs["high"].iloc[-1]
+        )
 
         if (
-            float(last["high"]) > last_swing_high
-            and float(last["close"]) < last_swing_high
+            float(last["high"]) > level
+            and float(last["close"]) < level
         ):
             return "BEARISH"
 
     # --------------------------------------------------------
-    # Bullish liquidity sweep:
-    # Price takes previous low but closes back above it.
+    # Bullish sweep
     # --------------------------------------------------------
 
     if not swing_lows.empty:
 
-        last_swing_low = float(swing_lows["low"].iloc[-1])
+        level = float(
+            swing_lows["low"].iloc[-1]
+        )
 
         if (
-            float(last["low"]) < last_swing_low
-            and float(last["close"]) > last_swing_low
+            float(last["low"]) < level
+            and float(last["close"]) > level
         ):
             return "BULLISH"
 
@@ -196,48 +283,73 @@ def detect_liquidity_sweep(df):
 
 def detect_fvg(df):
     """
-    Detect the latest 3-candle Fair Value Gap.
-
-    Bullish FVG:
-        candle[-3].high < candle[-1].low
-
-    Bearish FVG:
-        candle[-3].low > candle[-1].high
-
-    Returns information about the latest FVG.
+    Detect the latest three-candle Fair Value Gap.
     """
 
+    empty = {
+        "type": None,
+        "upper": None,
+        "lower": None,
+        "size": None
+    }
+
     if len(df) < 3:
-        return {
-            "type": None,
-            "upper": None,
-            "lower": None,
-            "size": None
-        }
+        return empty
 
-    data = df.reset_index(drop=True)
+    data = df.reset_index(
+        drop=True
+    )
 
-    c1 = data.iloc[-3]
-    c3 = data.iloc[-1]
+    first = data.iloc[-3]
+    last = data.iloc[-1]
+
+    try:
+
+        first_high = float(
+            first["high"]
+        )
+
+        first_low = float(
+            first["low"]
+        )
+
+        last_high = float(
+            last["high"]
+        )
+
+        last_low = float(
+            last["low"]
+        )
+
+    except Exception:
+
+        return empty
 
     atr = None
 
     if "atr" in data.columns:
+
         try:
-            atr = float(data["atr"].iloc[-1])
+            atr = float(
+                data["atr"].iloc[-1]
+            )
         except Exception:
             atr = None
 
+    # --------------------------------------------------------
     # Bullish FVG
-    bullish_gap = float(c1["high"]) < float(c3["low"])
+    # --------------------------------------------------------
 
-    if bullish_gap:
+    if first_high < last_low:
 
-        lower = float(c1["high"])
-        upper = float(c3["low"])
+        lower = first_high
+        upper = last_low
         size = upper - lower
 
-        if atr is None or size >= atr * FVG_MIN_SIZE_ATR:
+        if (
+            atr is None
+            or size >= atr * FVG_MIN_SIZE_ATR
+        ):
             return {
                 "type": "BULLISH",
                 "upper": upper,
@@ -245,16 +357,20 @@ def detect_fvg(df):
                 "size": size
             }
 
+    # --------------------------------------------------------
     # Bearish FVG
-    bearish_gap = float(c1["low"]) > float(c3["high"])
+    # --------------------------------------------------------
 
-    if bearish_gap:
+    if first_low > last_high:
 
-        upper = float(c1["low"])
-        lower = float(c3["high"])
+        upper = first_low
+        lower = last_high
         size = upper - lower
 
-        if atr is None or size >= atr * FVG_MIN_SIZE_ATR:
+        if (
+            atr is None
+            or size >= atr * FVG_MIN_SIZE_ATR
+        ):
             return {
                 "type": "BEARISH",
                 "upper": upper,
@@ -262,12 +378,7 @@ def detect_fvg(df):
                 "size": size
             }
 
-    return {
-        "type": None,
-        "upper": None,
-        "lower": None,
-        "size": None
-    }
+    return empty
 
 
 # ============================================================
@@ -276,79 +387,85 @@ def detect_fvg(df):
 
 def detect_order_block(df):
     """
-    Detect a simple candidate Order Block.
-
-    Bullish OB:
-        Last bearish candle before a strong bullish move.
-
-    Bearish OB:
-        Last bullish candle before a strong bearish move.
-
-    This is intentionally conservative.
+    Detect a simple recent Order Block candidate.
     """
 
-    if len(df) < 5:
-        return {
-            "type": None,
-            "high": None,
-            "low": None
-        }
-
-    data = df.reset_index(drop=True)
-
-    last = data.iloc[-1]
-
-    # Recent candles
-    recent = data.iloc[-5:-1]
-
-    last_close = float(last["close"])
-    last_open = float(last["open"])
-
-    # --------------------------------------------------------
-    # Bullish candidate
-    # --------------------------------------------------------
-
-    if last_close > last_open:
-
-        bearish_candidates = recent[
-            recent["close"] < recent["open"]
-        ]
-
-        if not bearish_candidates.empty:
-
-            candle = bearish_candidates.iloc[-1]
-
-            return {
-                "type": "BULLISH",
-                "high": float(candle["high"]),
-                "low": float(candle["low"])
-            }
-
-    # --------------------------------------------------------
-    # Bearish candidate
-    # --------------------------------------------------------
-
-    if last_close < last_open:
-
-        bullish_candidates = recent[
-            recent["close"] > recent["open"]
-        ]
-
-        if not bullish_candidates.empty:
-
-            candle = bullish_candidates.iloc[-1]
-
-            return {
-                "type": "BEARISH",
-                "high": float(candle["high"]),
-                "low": float(candle["low"])
-            }
-
-    return {
+    empty = {
         "type": None,
         "high": None,
         "low": None
     }
+
+    if len(df) < 5:
+        return empty
+
+    data = df.reset_index(
+        drop=True
+    )
+
+    last = data.iloc[-1]
+
+    recent = data.iloc[-5:-1]
+
+    last_open = float(
+        last["open"]
+    )
+
+    last_close = float(
+        last["close"]
+    )
+
+    # --------------------------------------------------------
+    # Bullish Order Block
+    # --------------------------------------------------------
+
+    if last_close > last_open:
+
+        candidates = recent[
+            recent["close"]
+            < recent["open"]
+        ]
+
+        if not candidates.empty:
+
+            candle = candidates.iloc[-1]
+
+            return {
+                "type": "BULLISH",
+                "high": float(
+                    candle["high"]
+                ),
+                "low": float(
+                    candle["low"]
+                )
+            }
+
+    # --------------------------------------------------------
+    # Bearish Order Block
+    # --------------------------------------------------------
+
+    if last_close < last_open:
+
+        candidates = recent[
+            recent["close"]
+            > recent["open"]
+        ]
+
+        if not candidates.empty:
+
+            candle = candidates.iloc[-1]
+
+            return {
+                "type": "BEARISH",
+                "high": float(
+                    candle["high"]
+                ),
+                "low": float(
+                    candle["low"]
+                )
+            }
+
+    return empty
 
 
 # ============================================================
@@ -357,14 +474,14 @@ def detect_order_block(df):
 
 def analyze_smc(df):
     """
-    Run all SMC analysis.
+    Run the SMC components required by signals.py.
 
-    Returns a compact dictionary that other modules
-    can consume safely.
+    Output keys are kept exactly compatible with
+    the current signal engine.
     """
 
     if df is None or df.empty:
-        return None
+        return empty_smc()
 
     required_columns = {
         "open",
@@ -373,34 +490,49 @@ def analyze_smc(df):
         "close"
     }
 
-    if not required_columns.issubset(df.columns):
-        return None
+    if not required_columns.issubset(
+        df.columns
+    ):
+        return empty_smc()
 
     try:
 
-        structure = detect_structure(df)
+        structure = detect_structure(
+            df
+        )
 
-        liquidity_sweep = detect_liquidity_sweep(df)
+        liquidity_sweep = (
+            detect_liquidity_sweep(df)
+        )
 
         fvg = detect_fvg(df)
 
-        order_block = detect_order_block(df)
+        order_block = (
+            detect_order_block(df)
+        )
 
         return {
+            "structure": structure[
+                "structure"
+            ],
 
-            "structure": structure["structure"],
+            "bos": structure[
+                "bos"
+            ],
 
-            "bos": structure["bos"],
+            "choch": structure[
+                "choch"
+            ],
 
-            "choch": structure["choch"],
-
-            "liquidity_sweep": liquidity_sweep,
+            "liquidity_sweep":
+                liquidity_sweep,
 
             "fvg": fvg,
 
-            "order_block": order_block
-
+            "order_block":
+                order_block
         }
 
     except Exception:
-        return None
+
+        return empty_smc()
