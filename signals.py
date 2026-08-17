@@ -2,21 +2,27 @@ from typing import Dict
 
 
 # ============================================================
-# SIGNAL ENGINE — V2
+# SIGNAL SCORE LIMITS
 # ============================================================
 
-MIN_SCORE = 75
-
 ELITE_SCORE = 90
-STRONG_SCORE = 82
+STRONG_SCORE = 80
+VALID_SCORE = 75
 
-REQUIRED_TIMEFRAMES = [
-    "5m",
-    "15m",
-    "1h",
-    "4h",
-    "1d"
-]
+
+# ============================================================
+# MINIMUM CONFIRMATION REQUIREMENTS
+# ============================================================
+
+MIN_SMC_CONFIRMATIONS = 2
+
+MIN_ADX = 20
+
+MIN_RSI_BULLISH = 50
+MAX_RSI_BULLISH = 70
+
+MIN_RSI_BEARISH = 30
+MAX_RSI_BEARISH = 50
 
 
 # ============================================================
@@ -24,782 +30,250 @@ REQUIRED_TIMEFRAMES = [
 # ============================================================
 
 def get_smc(tf_data: Dict) -> Dict:
+    """
+    Safely return SMC data from a timeframe.
+    """
+
     return tf_data.get(
         "smc",
         {}
     ) or {}
 
 
-def get_fvg(tf_data: Dict) -> Dict:
-    smc = get_smc(tf_data)
+# ============================================================
+# BULLISH SMC COUNT
+# ============================================================
 
-    return smc.get(
+def bullish_smc_count(
+    tf_data: Dict
+) -> int:
+    """
+    Count bullish SMC confirmations.
+    """
+
+    smc = get_smc(
+        tf_data
+    )
+
+    count = 0
+
+    if smc.get("structure") == "BULLISH":
+        count += 1
+
+    if smc.get("bos") == "BULLISH":
+        count += 1
+
+    if smc.get("choch") == "BULLISH":
+        count += 1
+
+    if smc.get("liquidity_sweep") == "BULLISH":
+        count += 1
+
+    fvg = smc.get(
         "fvg",
         {}
     ) or {}
 
+    if fvg.get("type") == "BULLISH":
+        count += 1
 
-def get_order_block(tf_data: Dict) -> Dict:
-    smc = get_smc(tf_data)
-
-    return smc.get(
+    order_block = smc.get(
         "order_block",
         {}
     ) or {}
 
+    if order_block.get("type") == "BULLISH":
+        count += 1
 
-def get_structure(tf_data: Dict):
-    smc = get_smc(tf_data)
+    return count
 
-    return smc.get(
-        "structure"
+
+# ============================================================
+# BEARISH SMC COUNT
+# ============================================================
+
+def bearish_smc_count(
+    tf_data: Dict
+) -> int:
+    """
+    Count bearish SMC confirmations.
+    """
+
+    smc = get_smc(
+        tf_data
+    )
+
+    count = 0
+
+    if smc.get("structure") == "BEARISH":
+        count += 1
+
+    if smc.get("bos") == "BEARISH":
+        count += 1
+
+    if smc.get("choch") == "BEARISH":
+        count += 1
+
+    if smc.get("liquidity_sweep") == "BEARISH":
+        count += 1
+
+    fvg = smc.get(
+        "fvg",
+        {}
+    ) or {}
+
+    if fvg.get("type") == "BEARISH":
+        count += 1
+
+    order_block = smc.get(
+        "order_block",
+        {}
+    ) or {}
+
+    if order_block.get("type") == "BEARISH":
+        count += 1
+
+    return count
+
+
+# ============================================================
+# SMC DIRECTION
+# ============================================================
+
+def is_bullish_smc(
+    tf_data: Dict
+) -> bool:
+    """
+    Require minimum bullish SMC confirmation.
+    """
+
+    return (
+        bullish_smc_count(
+            tf_data
+        )
+        >= MIN_SMC_CONFIRMATIONS
     )
 
 
-def get_bos(tf_data: Dict):
-    smc = get_smc(tf_data)
+def is_bearish_smc(
+    tf_data: Dict
+) -> bool:
+    """
+    Require minimum bearish SMC confirmation.
+    """
 
-    return smc.get(
-        "bos"
-    )
-
-
-def get_choch(tf_data: Dict):
-    smc = get_smc(tf_data)
-
-    return smc.get(
-        "choch"
-    )
-
-
-def get_liquidity_sweep(tf_data: Dict):
-    smc = get_smc(tf_data)
-
-    return smc.get(
-        "liquidity_sweep"
-    )
-
-
-def get_displacement(tf_data: Dict):
-    smc = get_smc(tf_data)
-
-    return smc.get(
-        "displacement"
+    return (
+        bearish_smc_count(
+            tf_data
+        )
+        >= MIN_SMC_CONFIRMATIONS
     )
 
 
 # ============================================================
-# TIMEFRAME VALIDATION
+# EMPTY SIGNAL
 # ============================================================
 
-def validate_timeframes(mtf_data: Dict):
+def no_trade(
+    score=0,
+    reasons=None,
+    breakdown=None
+):
+    """
+    Standard NO TRADE response.
+    """
+
+    return {
+        "signal": "⚪ NO TRADE",
+        "market": "NONE",
+        "direction": "NONE",
+        "score": score,
+        "confidence": "LOW",
+        "reasons": reasons or [],
+        "score_breakdown": breakdown or {
+            "trend": 0,
+            "setup": 0,
+            "entry": 0,
+            "smc": 0,
+            "momentum": 0,
+            "confirmation": 0
+        }
+    }
+
+
+# ============================================================
+# VALIDATE TIMEFRAMES
+# ============================================================
+
+def validate_timeframes(
+    mtf_data: Dict
+):
+    """
+    Ensure every required timeframe exists.
+    """
+
+    required = [
+        "5m",
+        "15m",
+        "1h",
+        "4h",
+        "1d"
+    ]
 
     if not isinstance(
         mtf_data,
         dict
     ):
-
         return False
 
-    for timeframe in REQUIRED_TIMEFRAMES:
+    for timeframe in required:
 
         if timeframe not in mtf_data:
-
             return False
 
         if not isinstance(
             mtf_data[timeframe],
             dict
         ):
-
             return False
 
     return True
 
 
 # ============================================================
-# TREND DETECTION
-# ============================================================
-
-def detect_trend(tf_data: Dict):
-
-    try:
-
-        ema20 = float(
-            tf_data["ema20"]
-        )
-
-        ema50 = float(
-            tf_data["ema50"]
-        )
-
-        ema200 = float(
-            tf_data["ema200"]
-        )
-
-    except Exception:
-
-        return "NEUTRAL"
-
-    if (
-        ema20 > ema50
-        and ema50 > ema200
-    ):
-
-        return "BULLISH"
-
-    if (
-        ema20 < ema50
-        and ema50 < ema200
-    ):
-
-        return "BEARISH"
-
-    return "NEUTRAL"
-
-
-# ============================================================
-# MACRO BIAS
-# ============================================================
-
-def detect_macro_bias(tf1d: Dict):
-
-    return detect_trend(
-        tf1d
-    )
-
-
-# ============================================================
-# PRIMARY TREND
-# ============================================================
-
-def detect_primary_trend(
-    tf4h: Dict,
-    tf1h: Dict
-):
-
-    trend_4h = detect_trend(
-        tf4h
-    )
-
-    trend_1h = detect_trend(
-        tf1h
-    )
-
-    if (
-        trend_4h == "BULLISH"
-        and trend_1h == "BULLISH"
-    ):
-
-        return "BULLISH"
-
-    if (
-        trend_4h == "BEARISH"
-        and trend_1h == "BEARISH"
-    ):
-
-        return "BEARISH"
-
-    return "NEUTRAL"
-
-
-# ============================================================
-# STRUCTURE CONFIRMATION
-# ============================================================
-
-def structure_confirmation(
-    tf1h: Dict,
-    direction: str
-):
-
-    structure = get_structure(
-        tf1h
-    )
-
-    bos = get_bos(
-        tf1h
-    )
-
-    choch = get_choch(
-        tf1h
-    )
-
-    if direction == "LONG":
-
-        if structure == "BULLISH":
-            return True
-
-        if bos == "BULLISH":
-            return True
-
-        if choch == "BULLISH":
-            return True
-
-    elif direction == "SHORT":
-
-        if structure == "BEARISH":
-            return True
-
-        if bos == "BEARISH":
-            return True
-
-        if choch == "BEARISH":
-            return True
-
-    return False
-
-
-# ============================================================
-# 15M SETUP
-# ============================================================
-
-def setup_confirmation(
-    tf15: Dict,
-    direction: str
-):
-
-    trend = detect_trend(
-        tf15
-    )
-
-    if direction == "LONG":
-
-        if trend != "BULLISH":
-            return False
-
-        smc = get_smc(
-            tf15
-        )
-
-        confirmations = sum([
-            smc.get("structure") == "BULLISH",
-            smc.get("bos") == "BULLISH",
-            smc.get("choch") == "BULLISH",
-            smc.get("liquidity_sweep") == "BULLISH",
-            get_fvg(tf15).get("type") == "BULLISH",
-            get_order_block(tf15).get("type") == "BULLISH",
-            get_displacement(tf15) == "BULLISH"
-        ])
-
-        return confirmations >= 2
-
-    if direction == "SHORT":
-
-        if trend != "BEARISH":
-            return False
-
-        smc = get_smc(
-            tf15
-        )
-
-        confirmations = sum([
-            smc.get("structure") == "BEARISH",
-            smc.get("bos") == "BEARISH",
-            smc.get("choch") == "BEARISH",
-            smc.get("liquidity_sweep") == "BEARISH",
-            get_fvg(tf15).get("type") == "BEARISH",
-            get_order_block(tf15).get("type") == "BEARISH",
-            get_displacement(tf15) == "BEARISH"
-        ])
-
-        return confirmations >= 2
-
-    return False
-
-
-# ============================================================
-# 5M ENTRY CONFIRMATION
-# ============================================================
-
-def entry_confirmation(
-    tf5: Dict,
-    direction: str
-):
-
-    try:
-
-        ema20 = float(
-            tf5["ema20"]
-        )
-
-        ema50 = float(
-            tf5["ema50"]
-        )
-
-        rsi = float(
-            tf5["rsi"]
-        )
-
-        macd = float(
-            tf5["macd"]
-        )
-
-        macd_signal = float(
-            tf5["macd_signal"]
-        )
-
-        stoch_k = float(
-            tf5["stoch_rsi_k"]
-        )
-
-        stoch_d = float(
-            tf5["stoch_rsi_d"]
-        )
-
-        close = float(
-            tf5["close"]
-        )
-
-        vwap = float(
-            tf5["vwap"]
-        )
-
-        adx = float(
-            tf5["adx"]
-        )
-
-    except Exception:
-
-        return False
-
-    # --------------------------------------------------------
-    # LONG
-    # --------------------------------------------------------
-
-    if direction == "LONG":
-
-        confirmations = 0
-
-        if ema20 > ema50:
-            confirmations += 1
-
-        if 50 <= rsi <= 68:
-            confirmations += 1
-
-        if macd > macd_signal:
-            confirmations += 1
-
-        if stoch_k > stoch_d:
-            confirmations += 1
-
-        if close > vwap:
-            confirmations += 1
-
-        if adx >= 20:
-            confirmations += 1
-
-        return confirmations >= 4
-
-    # --------------------------------------------------------
-    # SHORT
-    # --------------------------------------------------------
-
-    if direction == "SHORT":
-
-        confirmations = 0
-
-        if ema20 < ema50:
-            confirmations += 1
-
-        if 32 <= rsi <= 50:
-            confirmations += 1
-
-        if macd < macd_signal:
-            confirmations += 1
-
-        if stoch_k < stoch_d:
-            confirmations += 1
-
-        if close < vwap:
-            confirmations += 1
-
-        if adx >= 20:
-            confirmations += 1
-
-        return confirmations >= 4
-
-    return False
-
-
-# ============================================================
-# SMC CONFIRMATION
-# ============================================================
-
-def smc_confirmation(
-    tf4h: Dict,
-    tf1h: Dict,
-    tf15: Dict,
-    tf5: Dict,
-    direction: str
-):
-
-    timeframes = [
-        ("4H", tf4h),
-        ("1H", tf1h),
-        ("15M", tf15),
-        ("5M", tf5)
-    ]
-
-    confirmations = 0
-    reasons = []
-
-    for name, tf_data in timeframes:
-
-        structure = get_structure(
-            tf_data
-        )
-
-        bos = get_bos(
-            tf_data
-        )
-
-        choch = get_choch(
-            tf_data
-        )
-
-        sweep = get_liquidity_sweep(
-            tf_data
-        )
-
-        fvg = get_fvg(
-            tf_data
-        )
-
-        order_block = get_order_block(
-            tf_data
-        )
-
-        if direction == "LONG":
-
-            if structure == "BULLISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bullish Structure"
-                )
-
-            if bos == "BULLISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bullish BOS"
-                )
-
-            if choch == "BULLISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bullish CHOCH"
-                )
-
-            if sweep == "BULLISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bullish Liquidity Sweep"
-                )
-
-            if fvg.get("type") == "BULLISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bullish FVG"
-                )
-
-            if order_block.get("type") == "BULLISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bullish Order Block"
-                )
-
-        elif direction == "SHORT":
-
-            if structure == "BEARISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bearish Structure"
-                )
-
-            if bos == "BEARISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bearish BOS"
-                )
-
-            if choch == "BEARISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bearish CHOCH"
-                )
-
-            if sweep == "BEARISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bearish Liquidity Sweep"
-                )
-
-            if fvg.get("type") == "BEARISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bearish FVG"
-                )
-
-            if order_block.get("type") == "BEARISH":
-                confirmations += 1
-                reasons.append(
-                    f"{name} Bearish Order Block"
-                )
-
-    # --------------------------------------------------------
-    # Require genuine multi-timeframe confirmation
-    # --------------------------------------------------------
-
-    return (
-        confirmations >= 4,
-        confirmations,
-        reasons
-    )
-
-
-# ============================================================
-# MOMENTUM CONFIRMATION
-# ============================================================
-
-def momentum_confirmation(
-    tf5: Dict,
-    direction: str
-):
-
-    try:
-
-        rsi = float(
-            tf5["rsi"]
-        )
-
-        macd = float(
-            tf5["macd"]
-        )
-
-        macd_signal = float(
-            tf5["macd_signal"]
-        )
-
-        macd_hist = float(
-            tf5["macd_hist"]
-        )
-
-        stoch_k = float(
-            tf5["stoch_rsi_k"]
-        )
-
-        stoch_d = float(
-            tf5["stoch_rsi_d"]
-        )
-
-    except Exception:
-
-        return False, 0, []
-
-    score = 0
-    reasons = []
-
-    if direction == "LONG":
-
-        if 50 <= rsi <= 68:
-            score += 2
-            reasons.append(
-                "Healthy Bullish RSI"
-            )
-
-        if macd > macd_signal:
-            score += 2
-            reasons.append(
-                "Bullish MACD"
-            )
-
-        if macd_hist > 0:
-            score += 1
-            reasons.append(
-                "Positive MACD Histogram"
-            )
-
-        if stoch_k > stoch_d:
-            score += 1
-            reasons.append(
-                "Bullish Stoch RSI"
-            )
-
-        return (
-            score >= 3,
-            score,
-            reasons
-        )
-
-    if direction == "SHORT":
-
-        if 32 <= rsi <= 50:
-            score += 2
-            reasons.append(
-                "Healthy Bearish RSI"
-            )
-
-        if macd < macd_signal:
-            score += 2
-            reasons.append(
-                "Bearish MACD"
-            )
-
-        if macd_hist < 0:
-            score += 1
-            reasons.append(
-                "Negative MACD Histogram"
-            )
-
-        if stoch_k < stoch_d:
-            score += 1
-            reasons.append(
-                "Bearish Stoch RSI"
-            )
-
-        return (
-            score >= 3,
-            score,
-            reasons
-        )
-
-    return False, 0, []
-
-
-# ============================================================
-# MARKET CONFIRMATION
-# ============================================================
-
-def market_confirmation(
-    tf5: Dict,
-    direction: str
-):
-
-    try:
-
-        adx = float(
-            tf5["adx"]
-        )
-
-        volume = float(
-            tf5["volume"]
-        )
-
-        volume_sma = float(
-            tf5["volume_sma"]
-        )
-
-        close = float(
-            tf5["close"]
-        )
-
-        vwap = float(
-            tf5["vwap"]
-        )
-
-    except Exception:
-
-        return False, 0, []
-
-    score = 0
-    reasons = []
-
-    # --------------------------------------------------------
-    # ADX
-    # --------------------------------------------------------
-
-    if adx >= 25:
-
-        score += 2
-
-        reasons.append(
-            "Strong ADX"
-        )
-
-    elif adx >= 20:
-
-        score += 1
-
-        reasons.append(
-            "Developing Trend Strength"
-        )
-
-    # --------------------------------------------------------
-    # Volume
-    # --------------------------------------------------------
-
-    if volume > volume_sma:
-
-        score += 2
-
-        reasons.append(
-            "Above Average Volume"
-        )
-
-    # --------------------------------------------------------
-    # VWAP
-    # --------------------------------------------------------
-
-    if direction == "LONG":
-
-        if close > vwap:
-
-            score += 1
-
-            reasons.append(
-                "Price Above VWAP"
-            )
-
-    elif direction == "SHORT":
-
-        if close < vwap:
-
-            score += 1
-
-            reasons.append(
-                "Price Below VWAP"
-            )
-
-    return (
-        score >= 2,
-        score,
-        reasons
-    )
-
-
-# ============================================================
-# FINAL SIGNAL GENERATOR
+# MAIN SIGNAL GENERATOR
 # ============================================================
 
 def generate_signal(
     mtf_data: Dict
 ):
+    """
+    Strict professional multi-timeframe signal engine.
+
+    Hierarchy:
+
+        1D  = Macro direction
+        4H  = Main trend
+        1H  = Market structure
+        15M = Setup
+        5M  = Entry
+
+    Score alone cannot create a signal.
+    """
 
     # ========================================================
-    # VALIDATE INPUT
+    # VALIDATION
     # ========================================================
 
     if not validate_timeframes(
         mtf_data
     ):
 
-        return {
-            "signal": "⚪ NO TRADE",
-            "market": "NONE",
-            "direction": "NONE",
-            "score": 0,
-            "confidence": "LOW",
-            "reasons": [
+        return no_trade(
+            reasons=[
                 "Incomplete timeframe data"
-            ],
-            "score_breakdown": {
-                "trend": 0,
-                "setup": 0,
-                "entry": 0,
-                "smc": 0,
-                "momentum": 0,
-                "confirmation": 0
-            }
-        }
+            ]
+        )
 
     tf5 = mtf_data["5m"]
     tf15 = mtf_data["15m"]
@@ -807,99 +281,13 @@ def generate_signal(
     tf4h = mtf_data["4h"]
     tf1d = mtf_data["1d"]
 
+    # ========================================================
+    # SCORE VARIABLES
+    # ========================================================
+
+    score = 0
+
     reasons = []
-
-    # ========================================================
-    # DETERMINE MARKET BIAS
-    # ========================================================
-
-    macro_bias = detect_macro_bias(
-        tf1d
-    )
-
-    primary_trend = detect_primary_trend(
-        tf4h,
-        tf1h
-    )
-
-    # --------------------------------------------------------
-    # Do not trade against the daily macro trend
-    # --------------------------------------------------------
-
-    if macro_bias == "BULLISH":
-
-        if primary_trend != "BULLISH":
-
-            return {
-                "signal": "⚪ NO TRADE",
-                "market": "NONE",
-                "direction": "NONE",
-                "score": 0,
-                "confidence": "LOW",
-                "reasons": [
-                    "Daily bullish bias but 4H/1H trend is not aligned"
-                ],
-                "score_breakdown": {
-                    "trend": 0,
-                    "setup": 0,
-                    "entry": 0,
-                    "smc": 0,
-                    "momentum": 0,
-                    "confirmation": 0
-                }
-            }
-
-        direction = "LONG"
-
-    elif macro_bias == "BEARISH":
-
-        if primary_trend != "BEARISH":
-
-            return {
-                "signal": "⚪ NO TRADE",
-                "market": "NONE",
-                "direction": "NONE",
-                "score": 0,
-                "confidence": "LOW",
-                "reasons": [
-                    "Daily bearish bias but 4H/1H trend is not aligned"
-                ],
-                "score_breakdown": {
-                    "trend": 0,
-                    "setup": 0,
-                    "entry": 0,
-                    "smc": 0,
-                    "momentum": 0,
-                    "confirmation": 0
-                }
-            }
-
-        direction = "SHORT"
-
-    else:
-
-        return {
-            "signal": "⚪ NO TRADE",
-            "market": "NONE",
-            "direction": "NONE",
-            "score": 0,
-            "confidence": "LOW",
-            "reasons": [
-                "Daily macro trend is neutral"
-            ],
-            "score_breakdown": {
-                "trend": 0,
-                "setup": 0,
-                "entry": 0,
-                "smc": 0,
-                "momentum": 0,
-                "confirmation": 0
-            }
-        }
-
-    # ========================================================
-    # SCORE BREAKDOWN
-    # ========================================================
 
     trend_score = 0
     setup_score = 0
@@ -909,207 +297,697 @@ def generate_signal(
     confirmation_score = 0
 
     # ========================================================
-    # TREND SCORE
+    # 1D MACRO TREND
     # ========================================================
 
-    trend_score += 15
-
-    reasons.append(
-        f"1D {macro_bias} Macro Trend"
+    daily_bullish = (
+        tf1d["ema20"]
+        > tf1d["ema50"]
+        > tf1d["ema200"]
     )
 
-    trend_score += 10
-
-    reasons.append(
-        f"4H {primary_trend} Main Trend"
+    daily_bearish = (
+        tf1d["ema20"]
+        < tf1d["ema50"]
+        < tf1d["ema200"]
     )
 
-    trend_score += 10
+    # ========================================================
+    # 4H MAIN TREND
+    # ========================================================
 
-    reasons.append(
-        f"1H {primary_trend} Structure Trend"
+    bullish_4h = (
+        tf4h["ema20"]
+        > tf4h["ema50"]
+        > tf4h["ema200"]
     )
+
+    bearish_4h = (
+        tf4h["ema20"]
+        < tf4h["ema50"]
+        < tf4h["ema200"]
+    )
+
+    # ========================================================
+    # 1H STRUCTURE TREND
+    # ========================================================
+
+    bullish_1h = (
+        tf1h["ema20"]
+        > tf1h["ema50"]
+        > tf1h["ema200"]
+    )
+
+    bearish_1h = (
+        tf1h["ema20"]
+        < tf1h["ema50"]
+        < tf1h["ema200"]
+    )
+
+    # ========================================================
+    # PRIMARY TREND ALIGNMENT
+    # ========================================================
+
+    bullish_trend = (
+        daily_bullish
+        and bullish_4h
+        and bullish_1h
+    )
+
+    bearish_trend = (
+        daily_bearish
+        and bearish_4h
+        and bearish_1h
+    )
+
+    # ========================================================
+    # TREND SCORING
+    # ========================================================
+
+    if bullish_trend:
+
+        score += 15
+        trend_score += 15
+
+        reasons.append(
+            "1D Bullish Macro Trend"
+        )
+
+        score += 10
+        trend_score += 10
+
+        reasons.append(
+            "4H Bullish Main Trend"
+        )
+
+        score += 10
+        trend_score += 10
+
+        reasons.append(
+            "1H Bullish Structure Trend"
+        )
+
+    elif bearish_trend:
+
+        score += 15
+        trend_score += 15
+
+        reasons.append(
+            "1D Bearish Macro Trend"
+        )
+
+        score += 10
+        trend_score += 10
+
+        reasons.append(
+            "4H Bearish Main Trend"
+        )
+
+        score += 10
+        trend_score += 10
+
+        reasons.append(
+            "1H Bearish Structure Trend"
+        )
+
+    else:
+
+        return no_trade(
+            reasons=[
+                "Higher timeframe trend is not aligned"
+            ]
+        )
+
+    # ========================================================
+    # 1H SMC STRUCTURE
+    # ========================================================
+
+    if bullish_trend:
+
+        if not is_bullish_smc(
+            tf1h
+        ):
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "1H bullish SMC confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 7
+        smc_score += 7
+
+        reasons.append(
+            "1H Bullish SMC Structure Confirmed"
+        )
+
+    elif bearish_trend:
+
+        if not is_bearish_smc(
+            tf1h
+        ):
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "1H bearish SMC confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 7
+        smc_score += 7
+
+        reasons.append(
+            "1H Bearish SMC Structure Confirmed"
+        )
 
     # ========================================================
     # 15M SETUP
     # ========================================================
 
-    setup_ok = setup_confirmation(
-        tf15,
-        direction
+    bullish_15m = (
+        tf15["ema20"]
+        > tf15["ema50"]
     )
 
-    if not setup_ok:
-
-        return {
-            "signal": "⚪ NO TRADE",
-            "market": "NONE",
-            "direction": "NONE",
-            "score": trend_score,
-            "confidence": "LOW",
-            "reasons": reasons + [
-                "15M setup confirmation failed"
-            ],
-            "score_breakdown": {
-                "trend": trend_score,
-                "setup": 0,
-                "entry": 0,
-                "smc": 0,
-                "momentum": 0,
-                "confirmation": 0
-            }
-        }
-
-    setup_score = 10
-
-    reasons.append(
-        "15M Valid SMC Setup"
+    bearish_15m = (
+        tf15["ema20"]
+        < tf15["ema50"]
     )
+
+    if bullish_trend:
+
+        if not bullish_15m:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "15M bullish setup missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 8
+        setup_score += 8
+
+        reasons.append(
+            "15M Bullish Setup"
+        )
+
+        if is_bullish_smc(
+            tf15
+        ):
+
+            score += 5
+            smc_score += 5
+
+            reasons.append(
+                "15M Bullish SMC Setup"
+            )
+
+        else:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "15M bullish SMC confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+    elif bearish_trend:
+
+        if not bearish_15m:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "15M bearish setup missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 8
+        setup_score += 8
+
+        reasons.append(
+            "15M Bearish Setup"
+        )
+
+        if is_bearish_smc(
+            tf15
+        ):
+
+            score += 5
+            smc_score += 5
+
+            reasons.append(
+                "15M Bearish SMC Setup"
+            )
+
+        else:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "15M bearish SMC confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )    # ========================================================
+    # 5M ENTRY CONFIRMATION
+    # ========================================================
+
+    bullish_5m = (
+        tf5["ema20"]
+        > tf5["ema50"]
+    )
+
+    bearish_5m = (
+        tf5["ema20"]
+        < tf5["ema50"]
+    )
+
+    if bullish_trend:
+
+        if not bullish_5m:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "5M bullish entry trend missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 7
+        entry_score += 7
+
+        reasons.append(
+            "5M Bullish Entry Trend"
+        )
+
+        # ----------------------------------------------------
+        # 5M SMC ENTRY CONFIRMATION
+        # ----------------------------------------------------
+
+        if not is_bullish_smc(tf5):
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "5M bullish SMC entry confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 5
+        smc_score += 5
+
+        reasons.append(
+            "5M Bullish SMC Entry Confirmed"
+        )
+
+    elif bearish_trend:
+
+        if not bearish_5m:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "5M bearish entry trend missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 7
+        entry_score += 7
+
+        reasons.append(
+            "5M Bearish Entry Trend"
+        )
+
+        # ----------------------------------------------------
+        # 5M SMC ENTRY CONFIRMATION
+        # ----------------------------------------------------
+
+        if not is_bearish_smc(tf5):
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "5M bearish SMC entry confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 5
+        smc_score += 5
+
+        reasons.append(
+            "5M Bearish SMC Entry Confirmed"
+        )
 
     # ========================================================
-    # 5M ENTRY
+    # MOMENTUM CONFIRMATION
     # ========================================================
 
-    entry_ok = entry_confirmation(
-        tf5,
-        direction
-    )
+    if bullish_trend:
 
-    if not entry_ok:
+        # ----------------------------------------------------
+        # RSI
+        # ----------------------------------------------------
 
-        return {
-            "signal": "⚪ NO TRADE",
-            "market": "NONE",
-            "direction": "NONE",
-            "score": trend_score + setup_score,
-            "confidence": "LOW",
-            "reasons": reasons + [
-                "5M entry confirmation failed"
-            ],
-            "score_breakdown": {
-                "trend": trend_score,
-                "setup": setup_score,
-                "entry": 0,
-                "smc": 0,
-                "momentum": 0,
-                "confirmation": 0
-            }
-        }
+        if not (
+            MIN_RSI_BULLISH
+            <= tf5["rsi"]
+            <= MAX_RSI_BULLISH
+        ):
 
-    entry_score = 10
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "5M bullish RSI confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
 
-    reasons.append(
-        "5M Entry Confirmation"
-    )
+        score += 4
+        momentum_score += 4
 
-    # ========================================================
-    # SMC
-    # ========================================================
+        reasons.append(
+            "Healthy Bullish RSI"
+        )
 
-    smc_ok, smc_count, smc_reasons = smc_confirmation(
-        tf4h,
-        tf1h,
-        tf15,
-        tf5,
-        direction
-    )
+        # ----------------------------------------------------
+        # MACD
+        # ----------------------------------------------------
 
-    if not smc_ok:
+        if not (
+            tf5["macd"]
+            > tf5["macd_signal"]
+        ):
 
-        return {
-            "signal": "⚪ NO TRADE",
-            "market": "NONE",
-            "direction": "NONE",
-            "score": trend_score + setup_score + entry_score,
-            "confidence": "LOW",
-            "reasons": reasons + [
-                "Insufficient multi-timeframe SMC confirmation"
-            ],
-            "score_breakdown": {
-                "trend": trend_score,
-                "setup": setup_score,
-                "entry": entry_score,
-                "smc": 0,
-                "momentum": 0,
-                "confirmation": 0
-            }
-        }
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "Bullish MACD confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
 
-    smc_score = min(
-        15,
-        smc_count * 2
-    )
+        score += 4
+        momentum_score += 4
 
-    reasons.extend(
-        smc_reasons
-    )
+        reasons.append(
+            "Bullish MACD"
+        )
 
-    # ========================================================
-    # MOMENTUM
-    # ========================================================
+        # ----------------------------------------------------
+        # MACD HISTOGRAM
+        # ----------------------------------------------------
 
-    momentum_ok, momentum_score, momentum_reasons = momentum_confirmation(
-        tf5,
-        direction
-    )
+        if tf5["macd_hist"] <= 0:
 
-    if not momentum_ok:
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "Positive MACD histogram missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
 
-        return {
-            "signal": "⚪ NO TRADE",
-            "market": "NONE",
-            "direction": "NONE",
-            "score": (
-                trend_score
-                + setup_score
-                + entry_score
-                + smc_score
-            ),
-            "confidence": "LOW",
-            "reasons": reasons + [
-                "Momentum confirmation failed"
-            ],
-            "score_breakdown": {
-                "trend": trend_score,
-                "setup": setup_score,
-                "entry": entry_score,
-                "smc": smc_score,
-                "momentum": momentum_score,
-                "confirmation": 0
-            }
-        }
+        score += 2
+        momentum_score += 2
 
-    reasons.extend(
-        momentum_reasons
-    )
+        reasons.append(
+            "Positive MACD Histogram"
+        )
+
+        # ----------------------------------------------------
+        # STOCH RSI
+        # ----------------------------------------------------
+
+        if not (
+            tf5["stoch_rsi_k"]
+            > tf5["stoch_rsi_d"]
+        ):
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "Bullish Stoch RSI confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 2
+        momentum_score += 2
+
+        reasons.append(
+            "Bullish Stoch RSI"
+        )
+
+    elif bearish_trend:
+
+        # ----------------------------------------------------
+        # RSI
+        # ----------------------------------------------------
+
+        if not (
+            MIN_RSI_BEARISH
+            <= tf5["rsi"]
+            <= MAX_RSI_BEARISH
+        ):
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "5M bearish RSI confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 4
+        momentum_score += 4
+
+        reasons.append(
+            "Healthy Bearish RSI"
+        )
+
+        # ----------------------------------------------------
+        # MACD
+        # ----------------------------------------------------
+
+        if not (
+            tf5["macd"]
+            < tf5["macd_signal"]
+        ):
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "Bearish MACD confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 4
+        momentum_score += 4
+
+        reasons.append(
+            "Bearish MACD"
+        )
+
+        # ----------------------------------------------------
+        # MACD HISTOGRAM
+        # ----------------------------------------------------
+
+        if tf5["macd_hist"] >= 0:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "Negative MACD histogram missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 2
+        momentum_score += 2
+
+        reasons.append(
+            "Negative MACD Histogram"
+        )
+
+        # ----------------------------------------------------
+        # STOCH RSI
+        # ----------------------------------------------------
+
+        if not (
+            tf5["stoch_rsi_k"]
+            < tf5["stoch_rsi_d"]
+        ):
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "Bearish Stoch RSI confirmation missing"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 2
+        momentum_score += 2
+
+        reasons.append(
+            "Bearish Stoch RSI"
+        )
 
     # ========================================================
     # MARKET CONFIRMATION
     # ========================================================
 
-    confirmation_ok, confirmation_score, confirmation_reasons = market_confirmation(
-        tf5,
-        direction
-    )
+    # --------------------------------------------------------
+    # ADX
+    # --------------------------------------------------------
 
-    if not confirmation_ok:
+    if tf5["adx"] < MIN_ADX:
 
-        return {
-            "signal": "⚪ NO TRADE",
-            "market": "NONE",
-            "direction": "NONE",
-            "score": (
-                trend_score
-                + setup_score
-                + entry_score
-                + smc_score
-                + momentum_score
-            ),
-            "confidence": "LOW",
-            "reasons": reasons + [
-                "Market confirmation failed"
+        return no_trade(
+            score=score,
+            reasons=reasons + [
+                "Market trend strength is too weak"
             ],
-            "score_breakdown": {
+            breakdown={
                 "trend": trend_score,
                 "setup": setup_score,
                 "entry": entry_score,
@@ -1117,105 +995,211 @@ def generate_signal(
                 "momentum": momentum_score,
                 "confirmation": confirmation_score
             }
-        }
+        )
 
-    reasons.extend(
-        confirmation_reasons
+    score += 4
+    confirmation_score += 4
+
+    reasons.append(
+        "Acceptable ADX Trend Strength"
     )
+
+    # --------------------------------------------------------
+    # VOLUME
+    # --------------------------------------------------------
+
+    if tf5["volume"] <= tf5["volume_sma"]:
+
+        return no_trade(
+            score=score,
+            reasons=reasons + [
+                "Volume confirmation missing"
+            ],
+            breakdown={
+                "trend": trend_score,
+                "setup": setup_score,
+                "entry": entry_score,
+                "smc": smc_score,
+                "momentum": momentum_score,
+                "confirmation": confirmation_score
+            }
+        )
+
+    score += 3
+    confirmation_score += 3
+
+    reasons.append(
+        "Above Average Volume"
+    )
+
+    # --------------------------------------------------------
+    # VWAP
+    # --------------------------------------------------------
+
+    if bullish_trend:
+
+        if tf5["close"] <= tf5["vwap"]:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "Price is not above VWAP"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 3
+        confirmation_score += 3
+
+        reasons.append(
+            "Price Above VWAP"
+        )
+
+    elif bearish_trend:
+
+        if tf5["close"] >= tf5["vwap"]:
+
+            return no_trade(
+                score=score,
+                reasons=reasons + [
+                    "Price is not below VWAP"
+                ],
+                breakdown={
+                    "trend": trend_score,
+                    "setup": setup_score,
+                    "entry": entry_score,
+                    "smc": smc_score,
+                    "momentum": momentum_score,
+                    "confirmation": confirmation_score
+                }
+            )
+
+        score += 3
+        confirmation_score += 3
+
+        reasons.append(
+            "Price Below VWAP"
+        )
 
     # ========================================================
     # FINAL SCORE
     # ========================================================
 
-    score = (
-        trend_score
-        + setup_score
-        + entry_score
-        + smc_score
-        + momentum_score
-        + confirmation_score
-    )
-
     score = min(
-        score,
+        int(score),
         100
     )
 
     # ========================================================
-    # FINAL DECISION
+    # FINAL BREAKDOWN
     # ========================================================
 
-    if score < MIN_SCORE:
+    score_breakdown = {
+        "trend": trend_score,
+        "setup": setup_score,
+        "entry": entry_score,
+        "smc": smc_score,
+        "momentum": momentum_score,
+        "confirmation": confirmation_score
+    }
 
-        return {
-            "signal": "⚪ NO TRADE",
-            "market": "NONE",
-            "direction": "NONE",
-            "score": score,
-            "confidence": "LOW",
-            "reasons": reasons + [
-                f"Score below minimum threshold ({MIN_SCORE})"
+    # ========================================================
+    # FINAL SCORE THRESHOLD
+    # ========================================================
+
+    if score < VALID_SCORE:
+
+        return no_trade(
+            score=score,
+            reasons=reasons + [
+                "Final score below valid signal threshold"
             ],
-            "score_breakdown": {
-                "trend": trend_score,
-                "setup": setup_score,
-                "entry": entry_score,
-                "smc": smc_score,
-                "momentum": momentum_score,
-                "confirmation": confirmation_score
-            }
-        }
+            breakdown=score_breakdown
+        )
 
     # ========================================================
-    # LONG
+    # BULLISH FINAL DECISION
     # ========================================================
 
-    if direction == "LONG":
+    if bullish_trend:
 
         if score >= ELITE_SCORE:
 
             signal = "🔥 ELITE LONG"
             market = "FUTURES"
+            direction = "LONG"
             confidence = "VERY HIGH"
 
         elif score >= STRONG_SCORE:
 
             signal = "🟢 STRONG LONG"
             market = "FUTURES"
+            direction = "LONG"
             confidence = "HIGH"
 
         else:
 
-            signal = "🟢 LONG"
+            signal = "🟢 BUY"
             market = "SPOT"
+            direction = "BUY"
             confidence = "MEDIUM"
 
     # ========================================================
-    # SHORT
+    # BEARISH FINAL DECISION
     # ========================================================
 
-    else:
+    elif bearish_trend:
 
         if score >= ELITE_SCORE:
 
             signal = "🔥 ELITE SHORT"
             market = "FUTURES"
+            direction = "SHORT"
             confidence = "VERY HIGH"
 
         elif score >= STRONG_SCORE:
 
             signal = "🔴 STRONG SHORT"
             market = "FUTURES"
+            direction = "SHORT"
             confidence = "HIGH"
 
         else:
 
-            signal = "🔴 SHORT"
+            signal = "🔴 SELL"
             market = "SPOT"
+            direction = "SELL"
             confidence = "MEDIUM"
 
+    else:
+
+        return no_trade(
+            score=score,
+            reasons=reasons,
+            breakdown=score_breakdown
+        )
+
     # ========================================================
-    # FINAL RETURN
+    # FINAL SAFETY VALIDATION
+    # ========================================================
+
+    if direction == "NONE":
+
+        return no_trade(
+            score=score,
+            reasons=reasons,
+            breakdown=score_breakdown
+        )
+
+    # ========================================================
+    # RETURN FINAL SIGNAL
     # ========================================================
 
     return {
@@ -1225,12 +1209,5 @@ def generate_signal(
         "score": score,
         "confidence": confidence,
         "reasons": reasons,
-        "score_breakdown": {
-            "trend": trend_score,
-            "setup": setup_score,
-            "entry": entry_score,
-            "smc": smc_score,
-            "momentum": momentum_score,
-            "confirmation": confirmation_score
-        }
+        "score_breakdown": score_breakdown
     }
