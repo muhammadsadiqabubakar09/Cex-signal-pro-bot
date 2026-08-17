@@ -1,6 +1,7 @@
 from binance_api import get_candles
 from indicators import add_indicators
 from smc import analyze_smc
+from logger import log_info, log_warning, log_error
 
 
 # ============================================================
@@ -62,12 +63,21 @@ REQUIRED_SMC_FIELDS = [
     "bos",
     "choch",
     "liquidity_sweep",
-    "swing_high",
-    "previous_swing_high",
-    "swing_low",
-    "previous_swing_low",
     "fvg",
     "order_block"
+]
+
+
+# ============================================================
+# REQUIRED PRICE FIELDS
+# ============================================================
+
+REQUIRED_PRICE_FIELDS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume"
 ]
 
 
@@ -106,11 +116,10 @@ def is_valid_number(value):
 
 def validate_smc(smc_data):
     """
-    Validate the complete SMC response.
+    Validate the SMC structure produced by smc.py.
 
-    Some SMC values are legitimately None, such as BOS
-    when no break has occurred. Therefore validation only
-    requires the keys to exist.
+    The validator only checks fields that actually belong
+    to the current SMC output contract.
     """
 
     if not isinstance(
@@ -120,6 +129,10 @@ def validate_smc(smc_data):
 
         return False
 
+    # --------------------------------------------------------
+    # Main SMC fields
+    # --------------------------------------------------------
+
     for field in REQUIRED_SMC_FIELDS:
 
         if field not in smc_data:
@@ -127,7 +140,7 @@ def validate_smc(smc_data):
             return False
 
     # --------------------------------------------------------
-    # FVG structure
+    # FVG
     # --------------------------------------------------------
 
     fvg = smc_data.get(
@@ -153,7 +166,7 @@ def validate_smc(smc_data):
             return False
 
     # --------------------------------------------------------
-    # Order block structure
+    # Order Block
     # --------------------------------------------------------
 
     order_block = smc_data.get(
@@ -220,10 +233,31 @@ def analyze_timeframe(
 
         if df is None or df.empty:
 
+            log_warning(
+                f"{symbol} | {interval} | "
+                f"FAILED: no market data"
+            )
+
             return None
 
         # ====================================================
-        # INDICATORS
+        # PRICE DATA VALIDATION
+        # ====================================================
+
+        for column in REQUIRED_PRICE_FIELDS:
+
+            if column not in df.columns:
+
+                log_warning(
+                    f"{symbol} | {interval} | "
+                    f"FAILED: missing price field "
+                    f"{column}"
+                )
+
+                return None
+
+        # ====================================================
+        # TECHNICAL INDICATORS
         # ====================================================
 
         df = add_indicators(
@@ -231,6 +265,11 @@ def analyze_timeframe(
         )
 
         if df is None or df.empty:
+
+            log_warning(
+                f"{symbol} | {interval} | "
+                f"FAILED: indicators returned empty data"
+            )
 
             return None
 
@@ -242,17 +281,41 @@ def analyze_timeframe(
 
             if column not in df.columns:
 
+                log_warning(
+                    f"{symbol} | {interval} | "
+                    f"FAILED: missing indicator "
+                    f"{column}"
+                )
+
                 return None
 
-        # ----------------------------------------------------
-        # Latest row
-        # ----------------------------------------------------
+        # ====================================================
+        # LATEST CANDLE
+        # ====================================================
 
         last = df.iloc[-1]
 
-        # ----------------------------------------------------
-        # Validate latest indicator values
-        # ----------------------------------------------------
+        # ====================================================
+        # PRICE VALIDATION
+        # ====================================================
+
+        for column in REQUIRED_PRICE_FIELDS:
+
+            if not is_valid_number(
+                last[column]
+            ):
+
+                log_warning(
+                    f"{symbol} | {interval} | "
+                    f"FAILED: invalid price value "
+                    f"{column}"
+                )
+
+                return None
+
+        # ====================================================
+        # INDICATOR VALUE VALIDATION
+        # ====================================================
 
         for column in REQUIRED_INDICATORS:
 
@@ -260,10 +323,16 @@ def analyze_timeframe(
                 last[column]
             ):
 
+                log_warning(
+                    f"{symbol} | {interval} | "
+                    f"FAILED: invalid indicator "
+                    f"{column}"
+                )
+
                 return None
 
         # ====================================================
-        # SMC
+        # SMC ANALYSIS
         # ====================================================
 
         smc_data = analyze_smc(
@@ -274,13 +343,32 @@ def analyze_timeframe(
             smc_data
         ):
 
+            log_warning(
+                f"{symbol} | {interval} | "
+                f"FAILED: invalid SMC structure"
+            )
+
             return None
 
         # ====================================================
-        # TIMEFRAME SNAPSHOT
+        # BUILD TIMEFRAME SNAPSHOT
         # ====================================================
 
         result = {}
+
+        # ----------------------------------------------------
+        # Price data
+        # ----------------------------------------------------
+
+        for column in REQUIRED_PRICE_FIELDS:
+
+            result[column] = float(
+                last[column]
+            )
+
+        # ----------------------------------------------------
+        # Indicators
+        # ----------------------------------------------------
 
         for column in REQUIRED_INDICATORS:
 
@@ -306,7 +394,12 @@ def analyze_timeframe(
 
         return result
 
-    except Exception:
+    except Exception as error:
+
+        log_error(
+            f"{symbol} | {interval} | "
+            f"ANALYSIS ERROR: {error}"
+        )
 
         return None
 
@@ -327,13 +420,23 @@ def analyze_symbol(symbol):
         4h
         1d
 
-    The symbol is rejected if any required timeframe fails.
-
-    This prevents the Signal Engine from making a decision
-    using incomplete market information.
+    A symbol is accepted only when every required
+    timeframe produces valid data.
     """
 
+    symbol = str(
+        symbol
+    ).upper().strip()
+
     result = {}
+
+    log_info(
+        f"{symbol} | Starting multi-timeframe analysis"
+    )
+
+    # ========================================================
+    # ANALYZE EACH TIMEFRAME
+    # ========================================================
 
     for timeframe in TIMEFRAMES:
 
@@ -344,9 +447,19 @@ def analyze_symbol(symbol):
 
         if data is None:
 
+            log_warning(
+                f"{symbol} | "
+                f"Skipped: {timeframe} timeframe failed"
+            )
+
             return None
 
         result[timeframe] = data
+
+        log_info(
+            f"{symbol} | "
+            f"{timeframe}: OK"
+        )
 
     # ========================================================
     # FINAL VALIDATION
@@ -356,17 +469,87 @@ def analyze_symbol(symbol):
 
         if timeframe not in result:
 
+            log_warning(
+                f"{symbol} | "
+                f"Skipped: missing {timeframe}"
+            )
+
             return None
 
+        timeframe_data = result[
+            timeframe
+        ]
+
         if not isinstance(
-            result[timeframe],
+            timeframe_data,
             dict
         ):
 
+            log_warning(
+                f"{symbol} | "
+                f"Skipped: invalid {timeframe} data"
+            )
+
             return None
 
-        if "smc" not in result[timeframe]:
+        # ----------------------------------------------------
+        # Required close
+        # ----------------------------------------------------
+
+        if not is_valid_number(
+            timeframe_data.get(
+                "close"
+            )
+        ):
+
+            log_warning(
+                f"{symbol} | "
+                f"Skipped: invalid {timeframe} close"
+            )
 
             return None
+
+        # ----------------------------------------------------
+        # Required ATR
+        # ----------------------------------------------------
+
+        if not is_valid_number(
+            timeframe_data.get(
+                "atr"
+            )
+        ):
+
+            log_warning(
+                f"{symbol} | "
+                f"Skipped: invalid {timeframe} ATR"
+            )
+
+            return None
+
+        # ----------------------------------------------------
+        # Required SMC
+        # ----------------------------------------------------
+
+        if not validate_smc(
+            timeframe_data.get(
+                "smc"
+            )
+        ):
+
+            log_warning(
+                f"{symbol} | "
+                f"Skipped: invalid {timeframe} SMC"
+            )
+
+            return None
+
+    # ========================================================
+    # SUCCESS
+    # ========================================================
+
+    log_info(
+        f"{symbol} | "
+        f"All timeframes validated successfully"
+    )
 
     return result
