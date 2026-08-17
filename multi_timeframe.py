@@ -19,6 +19,168 @@ CANDLE_LIMIT = 250
 
 
 # ============================================================
+# REQUIRED INDICATORS
+# ============================================================
+
+REQUIRED_INDICATORS = [
+    "ema20",
+    "ema50",
+    "ema200",
+
+    "rsi",
+
+    "stoch_rsi",
+    "stoch_rsi_k",
+    "stoch_rsi_d",
+
+    "macd",
+    "macd_signal",
+    "macd_hist",
+
+    "adx",
+
+    "atr",
+
+    "bb_upper",
+    "bb_middle",
+    "bb_lower",
+    "bb_width",
+
+    "vwap",
+
+    "volume",
+    "volume_sma"
+]
+
+
+# ============================================================
+# REQUIRED SMC FIELDS
+# ============================================================
+
+REQUIRED_SMC_FIELDS = [
+    "structure",
+    "bos",
+    "choch",
+    "liquidity_sweep",
+    "swing_high",
+    "previous_swing_high",
+    "swing_low",
+    "previous_swing_low",
+    "fvg",
+    "order_block"
+]
+
+
+# ============================================================
+# VALIDATE NUMERIC VALUE
+# ============================================================
+
+def is_valid_number(value):
+    """
+    Check whether a value is a valid finite number.
+    """
+
+    try:
+
+        value = float(value)
+
+        return (
+            value == value
+            and value not in (
+                float("inf"),
+                float("-inf")
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        return False
+
+
+# ============================================================
+# VALIDATE SMC
+# ============================================================
+
+def validate_smc(smc_data):
+    """
+    Validate the complete SMC response.
+
+    Some SMC values are legitimately None, such as BOS
+    when no break has occurred. Therefore validation only
+    requires the keys to exist.
+    """
+
+    if not isinstance(
+        smc_data,
+        dict
+    ):
+
+        return False
+
+    for field in REQUIRED_SMC_FIELDS:
+
+        if field not in smc_data:
+
+            return False
+
+    # --------------------------------------------------------
+    # FVG structure
+    # --------------------------------------------------------
+
+    fvg = smc_data.get(
+        "fvg"
+    )
+
+    if not isinstance(
+        fvg,
+        dict
+    ):
+
+        return False
+
+    for field in [
+        "type",
+        "upper",
+        "lower",
+        "size"
+    ]:
+
+        if field not in fvg:
+
+            return False
+
+    # --------------------------------------------------------
+    # Order block structure
+    # --------------------------------------------------------
+
+    order_block = smc_data.get(
+        "order_block"
+    )
+
+    if not isinstance(
+        order_block,
+        dict
+    ):
+
+        return False
+
+    for field in [
+        "type",
+        "high",
+        "low"
+    ]:
+
+        if field not in order_block:
+
+            return False
+
+    return True
+
+
+# ============================================================
 # ANALYZE ONE TIMEFRAME
 # ============================================================
 
@@ -33,22 +195,22 @@ def analyze_timeframe(
 
         Binance
            ↓
-        Candles
+        OHLCV
            ↓
         Indicators
            ↓
         SMC
            ↓
-        Timeframe data
-
-    Output is compatible with signals.py.
+        Validation
+           ↓
+        Timeframe Snapshot
     """
 
     try:
 
-        # ----------------------------------------------------
-        # Get Binance candles
-        # ----------------------------------------------------
+        # ====================================================
+        # MARKET DATA
+        # ====================================================
 
         df = get_candles(
             symbol,
@@ -57,168 +219,92 @@ def analyze_timeframe(
         )
 
         if df is None or df.empty:
+
             return None
 
-        # ----------------------------------------------------
-        # Add technical indicators
-        # ----------------------------------------------------
+        # ====================================================
+        # INDICATORS
+        # ====================================================
 
         df = add_indicators(
             df
         )
 
         if df is None or df.empty:
+
             return None
 
-        # ----------------------------------------------------
-        # Make sure required indicators exist
-        # ----------------------------------------------------
+        # ====================================================
+        # INDICATOR VALIDATION
+        # ====================================================
 
-        required_indicators = [
-            "ema20",
-            "ema50",
-            "ema200",
-            "rsi",
-            "stoch_rsi",
-            "stoch_rsi_k",
-            "stoch_rsi_d",
-            "macd",
-            "macd_signal",
-            "macd_hist",
-            "adx",
-            "atr",
-            "bb_upper",
-            "bb_middle",
-            "bb_lower",
-            "bb_width",
-            "vwap",
-            "volume",
-            "volume_sma"
-        ]
-
-        for column in required_indicators:
+        for column in REQUIRED_INDICATORS:
 
             if column not in df.columns:
+
                 return None
 
         # ----------------------------------------------------
-        # SMC
-        # ----------------------------------------------------
-
-        smc_data = analyze_smc(
-            df
-        )
-
-        if smc_data is None:
-            return None
-
-        # ----------------------------------------------------
-        # Latest candle
+        # Latest row
         # ----------------------------------------------------
 
         last = df.iloc[-1]
 
         # ----------------------------------------------------
-        # Validate latest candle
+        # Validate latest indicator values
         # ----------------------------------------------------
 
-        values = [
-            last["close"],
-            last["ema20"],
-            last["ema50"],
-            last["ema200"],
-            last["rsi"],
-            last["stoch_rsi"],
-            last["stoch_rsi_k"],
-            last["stoch_rsi_d"],
-            last["macd"],
-            last["macd_signal"],
-            last["macd_hist"],
-            last["adx"],
-            last["atr"],
-            last["bb_upper"],
-            last["bb_middle"],
-            last["bb_lower"],
-            last["bb_width"],
-            last["vwap"],
-            last["volume"],
-            last["volume_sma"]
-        ]
+        for column in REQUIRED_INDICATORS:
 
-        for value in values:
+            if not is_valid_number(
+                last[column]
+            ):
 
-            if value is None:
                 return None
 
+        # ====================================================
+        # SMC
+        # ====================================================
+
+        smc_data = analyze_smc(
+            df
+        )
+
+        if not validate_smc(
+            smc_data
+        ):
+
+            return None
+
+        # ====================================================
+        # TIMEFRAME SNAPSHOT
+        # ====================================================
+
+        result = {}
+
+        for column in REQUIRED_INDICATORS:
+
+            result[column] = float(
+                last[column]
+            )
+
         # ----------------------------------------------------
-        # Return timeframe data
+        # SMC
         # ----------------------------------------------------
 
-        return {
+        result["smc"] = smc_data
 
-            "close":
-                float(last["close"]),
+        # ----------------------------------------------------
+        # Metadata
+        # ----------------------------------------------------
 
-            "ema20":
-                float(last["ema20"]),
+        result["timeframe"] = interval
 
-            "ema50":
-                float(last["ema50"]),
+        result["symbol"] = str(
+            symbol
+        ).upper()
 
-            "ema200":
-                float(last["ema200"]),
-
-            "rsi":
-                float(last["rsi"]),
-
-            "stoch_rsi":
-                float(last["stoch_rsi"]),
-
-            "stoch_rsi_k":
-                float(last["stoch_rsi_k"]),
-
-            "stoch_rsi_d":
-                float(last["stoch_rsi_d"]),
-
-            "macd":
-                float(last["macd"]),
-
-            "macd_signal":
-                float(last["macd_signal"]),
-
-            "macd_hist":
-                float(last["macd_hist"]),
-
-            "adx":
-                float(last["adx"]),
-
-            "atr":
-                float(last["atr"]),
-
-            "bb_upper":
-                float(last["bb_upper"]),
-
-            "bb_middle":
-                float(last["bb_middle"]),
-
-            "bb_lower":
-                float(last["bb_lower"]),
-
-            "bb_width":
-                float(last["bb_width"]),
-
-            "vwap":
-                float(last["vwap"]),
-
-            "volume":
-                float(last["volume"]),
-
-            "volume_sma":
-                float(last["volume_sma"]),
-
-            "smc":
-                smc_data
-        }
+        return result
 
     except Exception:
 
@@ -241,10 +327,10 @@ def analyze_symbol(symbol):
         4h
         1d
 
-    Returns None if any required timeframe fails.
+    The symbol is rejected if any required timeframe fails.
 
-    This prevents signals.py from receiving incomplete
-    multi-timeframe data.
+    This prevents the Signal Engine from making a decision
+    using incomplete market information.
     """
 
     result = {}
@@ -257,8 +343,30 @@ def analyze_symbol(symbol):
         )
 
         if data is None:
+
             return None
 
         result[timeframe] = data
+
+    # ========================================================
+    # FINAL VALIDATION
+    # ========================================================
+
+    for timeframe in TIMEFRAMES:
+
+        if timeframe not in result:
+
+            return None
+
+        if not isinstance(
+            result[timeframe],
+            dict
+        ):
+
+            return None
+
+        if "smc" not in result[timeframe]:
+
+            return None
 
     return result
