@@ -177,12 +177,12 @@ def validate_signal_data(
     # --------------------------------------------------------
 
     if direction not in [
-        "BUY",
-        "LONG",
-        "SHORT"
-    ]:
-
-        return False
+    "BUY",
+    "SELL",
+    "LONG",
+    "SHORT"
+]:
+    return False
 
     # --------------------------------------------------------
     # Market
