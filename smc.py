@@ -2,13 +2,20 @@ import pandas as pd
 
 
 # ============================================================
-# SMC CONFIGURATION
+# SMC ENGINE — V2
 # ============================================================
 
 SWING_LEFT = 3
 SWING_RIGHT = 3
 
-FVG_MIN_SIZE_ATR = 0.10
+# Minimum FVG size relative to ATR.
+FVG_MIN_SIZE_ATR = 0.20
+
+# Minimum displacement candle body relative to ATR.
+DISPLACEMENT_MIN_ATR = 0.80
+
+# Minimum wick penetration beyond liquidity level.
+SWEEP_MIN_ATR = 0.05
 
 
 # ============================================================
@@ -19,26 +26,57 @@ def empty_smc():
     """
     Return a safe empty SMC structure.
 
-    This guarantees compatibility with signals.py.
+    Keeps compatibility with signals.py.
     """
 
     return {
         "structure": "NEUTRAL",
+
         "bos": None,
+
         "choch": None,
+
         "liquidity_sweep": None,
+
         "fvg": {
             "type": None,
             "upper": None,
             "lower": None,
             "size": None
         },
+
         "order_block": {
             "type": None,
             "high": None,
             "low": None
-        }
+        },
+
+        "displacement": None
     }
+
+
+# ============================================================
+# VALIDATION
+# ============================================================
+
+def validate_dataframe(df):
+    """
+    Validate the dataframe before SMC analysis.
+    """
+
+    if df is None or df.empty:
+        return False
+
+    required_columns = {
+        "open",
+        "high",
+        "low",
+        "close"
+    }
+
+    return required_columns.issubset(
+        df.columns
+    )
 
 
 # ============================================================
@@ -52,6 +90,9 @@ def find_swings(
 ):
     """
     Detect confirmed swing highs and swing lows.
+
+    A swing is confirmed only after candles exist
+    on both sides of the candidate candle.
     """
 
     data = df.copy()
@@ -91,19 +132,29 @@ def find_swings(
             i + 1:i + right + 1
         ]
 
+        # ----------------------------------------------------
+        # Swing High
+        # ----------------------------------------------------
+
         if (
             current_high > left_highs.max()
             and current_high > right_highs.max()
         ):
+
             data.at[
                 data.index[i],
                 "swing_high"
             ] = True
 
+        # ----------------------------------------------------
+        # Swing Low
+        # ----------------------------------------------------
+
         if (
             current_low < left_lows.min()
             and current_low < right_lows.min()
         ):
+
             data.at[
                 data.index[i],
                 "swing_low"
@@ -118,7 +169,11 @@ def find_swings(
 
 def detect_structure(df):
     """
-    Detect market structure, BOS and CHOCH.
+    Detect current market structure and confirmed
+    BOS / CHOCH.
+
+    Structure is based on the latest confirmed
+    swing highs and swing lows.
     """
 
     data = find_swings(df)
@@ -135,15 +190,12 @@ def detect_structure(df):
         len(swing_highs) < 2
         or len(swing_lows) < 2
     ):
+
         return {
             "structure": "NEUTRAL",
             "bos": None,
             "choch": None
         }
-
-    last_close = float(
-        data["close"].iloc[-1]
-    )
 
     latest_high = float(
         swing_highs["high"].iloc[-1]
@@ -160,6 +212,14 @@ def detect_structure(df):
     previous_low = float(
         swing_lows["low"].iloc[-2]
     )
+
+    last_close = float(
+        data["close"].iloc[-1]
+    )
+
+    # ========================================================
+    # STRUCTURE
+    # ========================================================
 
     bullish_structure = (
         latest_high > previous_high
@@ -183,30 +243,32 @@ def detect_structure(df):
 
         structure = "NEUTRAL"
 
+    # ========================================================
+    # BOS
+    # ========================================================
+
     bos = None
     choch = None
-
-    # --------------------------------------------------------
-    # Bullish break
-    # --------------------------------------------------------
 
     if last_close > latest_high:
 
         bos = "BULLISH"
 
-        if bearish_structure:
-            choch = "BULLISH"
-
-    # --------------------------------------------------------
-    # Bearish break
-    # --------------------------------------------------------
-
     elif last_close < latest_low:
 
         bos = "BEARISH"
 
-        if bullish_structure:
-            choch = "BEARISH"
+    # ========================================================
+    # CHOCH
+    # ========================================================
+
+    if bearish_structure and last_close > latest_high:
+
+        choch = "BULLISH"
+
+    elif bullish_structure and last_close < latest_low:
+
+        choch = "BEARISH"
 
     return {
         "structure": structure,
@@ -221,30 +283,56 @@ def detect_structure(df):
 
 def detect_liquidity_sweep(df):
     """
-    Detect bullish or bearish liquidity sweep.
+    Detect meaningful liquidity sweeps.
+
+    Bullish sweep:
+        Price trades below a confirmed swing low
+        and closes back above that level.
+
+    Bearish sweep:
+        Price trades above a confirmed swing high
+        and closes back below that level.
+
+    A minimum ATR penetration is required to reduce
+    random wick noise.
     """
 
     data = find_swings(df)
 
-    swing_highs = data[
-        data["swing_high"]
-    ]
+    if "atr" in data.columns:
 
-    swing_lows = data[
-        data["swing_low"]
-    ]
+        try:
+            atr = float(
+                data["atr"].iloc[-1]
+            )
+        except Exception:
+            atr = 0.0
 
-    if (
-        swing_highs.empty
-        and swing_lows.empty
-    ):
-        return None
+    else:
+
+        atr = 0.0
 
     last = data.iloc[-1]
 
-    # --------------------------------------------------------
-    # Bearish sweep
-    # --------------------------------------------------------
+    last_high = float(
+        last["high"]
+    )
+
+    last_low = float(
+        last["low"]
+    )
+
+    last_close = float(
+        last["close"]
+    )
+
+    # ========================================================
+    # BEARISH LIQUIDITY SWEEP
+    # ========================================================
+
+    swing_highs = data[
+        data["swing_high"]
+    ]
 
     if not swing_highs.empty:
 
@@ -252,15 +340,28 @@ def detect_liquidity_sweep(df):
             swing_highs["high"].iloc[-1]
         )
 
+        penetration = (
+            last_high - level
+        )
+
+        minimum_penetration = (
+            atr * SWEEP_MIN_ATR
+        )
+
         if (
-            float(last["high"]) > level
-            and float(last["close"]) < level
+            penetration >= minimum_penetration
+            and last_close < level
         ):
+
             return "BEARISH"
 
-    # --------------------------------------------------------
-    # Bullish sweep
-    # --------------------------------------------------------
+    # ========================================================
+    # BULLISH LIQUIDITY SWEEP
+    # ========================================================
+
+    swing_lows = data[
+        data["swing_low"]
+    ]
 
     if not swing_lows.empty:
 
@@ -268,11 +369,78 @@ def detect_liquidity_sweep(df):
             swing_lows["low"].iloc[-1]
         )
 
+        penetration = (
+            level - last_low
+        )
+
+        minimum_penetration = (
+            atr * SWEEP_MIN_ATR
+        )
+
         if (
-            float(last["low"]) < level
-            and float(last["close"]) > level
+            penetration >= minimum_penetration
+            and last_close > level
         ):
+
             return "BULLISH"
+
+    return None
+
+
+# ============================================================
+# DISPLACEMENT
+# ============================================================
+
+def detect_displacement(df):
+    """
+    Detect strong directional displacement.
+
+    A displacement candle must have a body
+    large enough relative to ATR.
+    """
+
+    if len(df) < 2:
+        return None
+
+    last = df.iloc[-1]
+
+    try:
+
+        open_price = float(
+            last["open"]
+        )
+
+        close_price = float(
+            last["close"]
+        )
+
+        atr = float(
+            last["atr"]
+        ) if "atr" in df.columns else 0.0
+
+    except Exception:
+
+        return None
+
+    if atr <= 0:
+        return None
+
+    body = abs(
+        close_price - open_price
+    )
+
+    body_ratio = body / atr
+
+    if body_ratio < DISPLACEMENT_MIN_ATR:
+        return None
+
+    if close_price > open_price:
+
+        return "BULLISH"
+
+    if close_price < open_price:
+
+        return "BEARISH"
 
     return None
 
@@ -284,6 +452,11 @@ def detect_liquidity_sweep(df):
 def detect_fvg(df):
     """
     Detect the latest three-candle Fair Value Gap.
+
+    Requires:
+        - Actual price imbalance
+        - Minimum ATR size
+        - Directional displacement
     """
 
     empty = {
@@ -301,6 +474,7 @@ def detect_fvg(df):
     )
 
     first = data.iloc[-3]
+    middle = data.iloc[-2]
     last = data.iloc[-1]
 
     try:
@@ -313,6 +487,14 @@ def detect_fvg(df):
             first["low"]
         )
 
+        middle_open = float(
+            middle["open"]
+        )
+
+        middle_close = float(
+            middle["close"]
+        )
+
         last_high = float(
             last["high"]
         )
@@ -321,35 +503,46 @@ def detect_fvg(df):
             last["low"]
         )
 
+        atr = float(
+            last["atr"]
+        ) if "atr" in data.columns else 0.0
+
     except Exception:
 
         return empty
 
-    atr = None
+    if atr <= 0:
+        return empty
 
-    if "atr" in data.columns:
-
-        try:
-            atr = float(
-                data["atr"].iloc[-1]
-            )
-        except Exception:
-            atr = None
-
-    # --------------------------------------------------------
-    # Bullish FVG
-    # --------------------------------------------------------
+    # ========================================================
+    # BULLISH FVG
+    # ========================================================
 
     if first_high < last_low:
 
         lower = first_high
         upper = last_low
+
         size = upper - lower
 
+        middle_body = abs(
+            middle_close - middle_open
+        )
+
+        bullish_middle = (
+            middle_close > middle_open
+        )
+
+        displacement = (
+            middle_body >= atr * DISPLACEMENT_MIN_ATR
+        )
+
         if (
-            atr is None
-            or size >= atr * FVG_MIN_SIZE_ATR
+            bullish_middle
+            and displacement
+            and size >= atr * FVG_MIN_SIZE_ATR
         ):
+
             return {
                 "type": "BULLISH",
                 "upper": upper,
@@ -357,20 +550,35 @@ def detect_fvg(df):
                 "size": size
             }
 
-    # --------------------------------------------------------
-    # Bearish FVG
-    # --------------------------------------------------------
+    # ========================================================
+    # BEARISH FVG
+    # ========================================================
 
     if first_low > last_high:
 
         upper = first_low
         lower = last_high
+
         size = upper - lower
 
+        middle_body = abs(
+            middle_close - middle_open
+        )
+
+        bearish_middle = (
+            middle_close < middle_open
+        )
+
+        displacement = (
+            middle_body >= atr * DISPLACEMENT_MIN_ATR
+        )
+
         if (
-            atr is None
-            or size >= atr * FVG_MIN_SIZE_ATR
+            bearish_middle
+            and displacement
+            and size >= atr * FVG_MIN_SIZE_ATR
         ):
+
             return {
                 "type": "BEARISH",
                 "upper": upper,
@@ -387,7 +595,13 @@ def detect_fvg(df):
 
 def detect_order_block(df):
     """
-    Detect a simple recent Order Block candidate.
+    Detect a recent Order Block candidate.
+
+    The Order Block must be an opposing candle
+    immediately preceding a strong displacement candle.
+
+    This is stricter than simply selecting any
+    recent bullish/bearish candle.
     """
 
     empty = {
@@ -403,65 +617,65 @@ def detect_order_block(df):
         drop=True
     )
 
-    last = data.iloc[-1]
-
-    recent = data.iloc[-5:-1]
-
-    last_open = float(
-        last["open"]
+    displacement = detect_displacement(
+        data
     )
 
-    last_close = float(
-        last["close"]
+    if displacement is None:
+        return empty
+
+    displacement_candle = data.iloc[-1]
+    previous_candle = data.iloc[-2]
+
+    displacement_open = float(
+        displacement_candle["open"]
     )
 
-    # --------------------------------------------------------
-    # Bullish Order Block
-    # --------------------------------------------------------
+    displacement_close = float(
+        displacement_candle["close"]
+    )
 
-    if last_close > last_open:
+    previous_open = float(
+        previous_candle["open"]
+    )
 
-        candidates = recent[
-            recent["close"]
-            < recent["open"]
-        ]
+    previous_close = float(
+        previous_candle["close"]
+    )
 
-        if not candidates.empty:
+    # ========================================================
+    # BULLISH ORDER BLOCK
+    # ========================================================
 
-            candle = candidates.iloc[-1]
+    if displacement == "BULLISH":
+
+        if previous_close < previous_open:
 
             return {
                 "type": "BULLISH",
                 "high": float(
-                    candle["high"]
+                    previous_candle["high"]
                 ),
                 "low": float(
-                    candle["low"]
+                    previous_candle["low"]
                 )
             }
 
-    # --------------------------------------------------------
-    # Bearish Order Block
-    # --------------------------------------------------------
+    # ========================================================
+    # BEARISH ORDER BLOCK
+    # ========================================================
 
-    if last_close < last_open:
+    if displacement == "BEARISH":
 
-        candidates = recent[
-            recent["close"]
-            > recent["open"]
-        ]
-
-        if not candidates.empty:
-
-            candle = candidates.iloc[-1]
+        if previous_close > previous_open:
 
             return {
                 "type": "BEARISH",
                 "high": float(
-                    candle["high"]
+                    previous_candle["high"]
                 ),
                 "low": float(
-                    candle["low"]
+                    previous_candle["low"]
                 )
             }
 
@@ -474,25 +688,20 @@ def detect_order_block(df):
 
 def analyze_smc(df):
     """
-    Run the SMC components required by signals.py.
+    Run the complete SMC V2 analysis.
 
-    Output keys are kept exactly compatible with
-    the current signal engine.
+    Returns:
+        structure
+        BOS
+        CHOCH
+        liquidity sweep
+        FVG
+        Order Block
+        displacement
     """
 
-    if df is None or df.empty:
-        return empty_smc()
+    if not validate_dataframe(df):
 
-    required_columns = {
-        "open",
-        "high",
-        "low",
-        "close"
-    }
-
-    if not required_columns.issubset(
-        df.columns
-    ):
         return empty_smc()
 
     try:
@@ -505,32 +714,40 @@ def analyze_smc(df):
             detect_liquidity_sweep(df)
         )
 
-        fvg = detect_fvg(df)
+        fvg = detect_fvg(
+            df
+        )
 
-        order_block = (
-            detect_order_block(df)
+        order_block = detect_order_block(
+            df
+        )
+
+        displacement = detect_displacement(
+            df
         )
 
         return {
-            "structure": structure[
-                "structure"
-            ],
 
-            "bos": structure[
-                "bos"
-            ],
+            "structure":
+                structure["structure"],
 
-            "choch": structure[
-                "choch"
-            ],
+            "bos":
+                structure["bos"],
+
+            "choch":
+                structure["choch"],
 
             "liquidity_sweep":
                 liquidity_sweep,
 
-            "fvg": fvg,
+            "fvg":
+                fvg,
 
             "order_block":
-                order_block
+                order_block,
+
+            "displacement":
+                displacement
         }
 
     except Exception:
