@@ -8,9 +8,11 @@ import requests
 PRIMARY_URL = "https://data-api.binance.vision/api/v3/ticker/24hr"
 FALLBACK_URL = "https://api.binance.com/api/v3/ticker/24hr"
 
+REQUEST_TIMEOUT = 10
+
 
 # ============================================================
-# WATCHLIST CONFIGURATION
+# CORE COINS
 # ============================================================
 
 CORE_COINS = [
@@ -20,6 +22,10 @@ CORE_COINS = [
     "SOLUSDT"
 ]
 
+
+# ============================================================
+# FAVORITE COINS
+# ============================================================
 
 FAVORITE_COINS = [
     "SUIUSDT",
@@ -56,10 +62,10 @@ BLACKLIST = {
 
 
 # ============================================================
-# LEVERAGED TOKENS
+# LEVERAGED TOKEN FILTER
 # ============================================================
 
-IGNORE_SUFFIX = (
+IGNORE_SUFFIXES = (
     "UPUSDT",
     "DOWNUSDT",
     "BULLUSDT",
@@ -68,21 +74,27 @@ IGNORE_SUFFIX = (
 
 
 # ============================================================
-# FILTER SETTINGS
+# WATCHLIST LIMITS
 # ============================================================
 
-MIN_QUOTE_VOLUME = 5_000_000
+MAX_DYNAMIC_COINS = 15
 
-MIN_PRICE_CHANGE = 1.0
+MIN_QUOTE_VOLUME = 10_000_000
 
-MAX_DYNAMIC_COINS = 35
+MIN_PRICE_CHANGE = 1.5
 
 
 # ============================================================
-# DOWNLOAD MARKET DATA
+# DOWNLOAD 24H MARKET DATA
 # ============================================================
 
 def download_market():
+    """
+    Download Binance 24-hour ticker data.
+
+    Uses a primary endpoint and automatically falls back
+    to the secondary Binance endpoint if necessary.
+    """
 
     for url in (
         PRIMARY_URL,
@@ -93,29 +105,40 @@ def download_market():
 
             response = requests.get(
                 url,
-                timeout=10
+                timeout=REQUEST_TIMEOUT
             )
 
             response.raise_for_status()
 
             data = response.json()
 
-            if isinstance(data, list) and data:
+            if (
+                isinstance(data, list)
+                and data
+            ):
                 return data
 
         except Exception:
             continue
 
-    raise Exception(
+    raise RuntimeError(
         "Unable to fetch Binance market data."
     )
 
 
 # ============================================================
-# BASIC COIN FILTER
+# SYMBOL VALIDATION
 # ============================================================
 
 def is_good_coin(symbol):
+    """
+    Reject symbols that are unsuitable for the scanner.
+    """
+
+    if not symbol:
+        return False
+
+    symbol = str(symbol).upper()
 
     if not symbol.endswith("USDT"):
         return False
@@ -123,7 +146,7 @@ def is_good_coin(symbol):
     if symbol in BLACKLIST:
         return False
 
-    for suffix in IGNORE_SUFFIX:
+    for suffix in IGNORE_SUFFIXES:
 
         if symbol.endswith(suffix):
             return False
@@ -135,16 +158,17 @@ def is_good_coin(symbol):
 # COIN QUALITY SCORE
 # ============================================================
 
-def calculate_coin_score(volume, change):
-
+def calculate_coin_score(
+    volume,
+    price_change
+):
     """
-    Rank coins using:
-        - Trading volume
-        - Volatility
+    Calculate a simple liquidity/activity score.
 
-    NOTE:
-    Binance 24hr ticker does not provide market cap.
-    Therefore this is NOT an actual market-cap ranking.
+    Volume receives the larger weight because liquidity
+    is more important than raw 24h price movement.
+
+    This is NOT a market-cap ranking.
     """
 
     volume_score = min(
@@ -153,7 +177,7 @@ def calculate_coin_score(volume, change):
     )
 
     volatility_score = min(
-        change * 5,
+        price_change * 5,
         50
     )
 
@@ -167,7 +191,16 @@ def calculate_coin_score(volume, change):
 # BUILD DYNAMIC WATCHLIST
 # ============================================================
 
-def get_dynamic_coins(data, limit=MAX_DYNAMIC_COINS):
+def get_dynamic_coins(
+    data,
+    limit=MAX_DYNAMIC_COINS
+):
+    """
+    Select additional liquid and active USDT pairs.
+
+    Core and favorite coins are excluded here because
+    they are added separately.
+    """
 
     candidates = []
 
@@ -175,13 +208,9 @@ def get_dynamic_coins(data, limit=MAX_DYNAMIC_COINS):
 
         symbol = coin.get("symbol")
 
-        if not symbol:
-            continue
-
         if not is_good_coin(symbol):
             continue
 
-        # Do not duplicate core/favorite coins
         if symbol in CORE_COINS:
             continue
 
@@ -191,10 +220,13 @@ def get_dynamic_coins(data, limit=MAX_DYNAMIC_COINS):
         try:
 
             volume = float(
-                coin.get("quoteVolume", 0)
+                coin.get(
+                    "quoteVolume",
+                    0
+                )
             )
 
-            change = abs(
+            price_change = abs(
                 float(
                     coin.get(
                         "priceChangePercent",
@@ -203,27 +235,30 @@ def get_dynamic_coins(data, limit=MAX_DYNAMIC_COINS):
                 )
             )
 
-        except (TypeError, ValueError):
+        except (
+            TypeError,
+            ValueError
+        ):
 
             continue
 
-        # ====================================================
+        # ----------------------------------------------------
         # LIQUIDITY FILTER
-        # ====================================================
+        # ----------------------------------------------------
 
         if volume < MIN_QUOTE_VOLUME:
             continue
 
-        # ====================================================
+        # ----------------------------------------------------
         # ACTIVITY FILTER
-        # ====================================================
+        # ----------------------------------------------------
 
-        if change < MIN_PRICE_CHANGE:
+        if price_change < MIN_PRICE_CHANGE:
             continue
 
         score = calculate_coin_score(
             volume,
-            change
+            price_change
         )
 
         candidates.append(
@@ -231,11 +266,14 @@ def get_dynamic_coins(data, limit=MAX_DYNAMIC_COINS):
                 "symbol": symbol,
                 "score": score,
                 "volume": volume,
-                "change": change
+                "price_change": price_change
             }
         )
 
-    # Highest quality first
+    # --------------------------------------------------------
+    # HIGHEST QUALITY FIRST
+    # --------------------------------------------------------
+
     candidates.sort(
         key=lambda item: item["score"],
         reverse=True
@@ -251,7 +289,20 @@ def get_dynamic_coins(data, limit=MAX_DYNAMIC_COINS):
 # FINAL WATCHLIST
 # ============================================================
 
-def get_watchlist(limit=MAX_DYNAMIC_COINS):
+def get_watchlist(
+    limit=MAX_DYNAMIC_COINS
+):
+    """
+    Return the final scanner watchlist.
+
+    Priority:
+
+        1. Core coins
+        2. Favorite coins
+        3. Dynamic liquid coins
+
+    Duplicates are automatically removed.
+    """
 
     data = download_market()
 
@@ -266,7 +317,10 @@ def get_watchlist(limit=MAX_DYNAMIC_COINS):
         + dynamic_coins
     )
 
-    # Remove duplicates while preserving order
+    # --------------------------------------------------------
+    # REMOVE DUPLICATES
+    # --------------------------------------------------------
+
     watchlist = list(
         dict.fromkeys(watchlist)
     )
