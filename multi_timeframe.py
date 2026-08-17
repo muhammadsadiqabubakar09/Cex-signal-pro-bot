@@ -27,30 +27,35 @@ REQUIRED_INDICATORS = [
     "ema20",
     "ema50",
     "ema200",
-
     "rsi",
-
     "stoch_rsi",
     "stoch_rsi_k",
     "stoch_rsi_d",
-
     "macd",
     "macd_signal",
     "macd_hist",
-
     "adx",
-
     "atr",
-
     "bb_upper",
     "bb_middle",
     "bb_lower",
     "bb_width",
-
     "vwap",
-
     "volume",
     "volume_sma"
+]
+
+
+# ============================================================
+# REQUIRED PRICE FIELDS
+# ============================================================
+
+REQUIRED_PRICE_FIELDS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume"
 ]
 
 
@@ -69,68 +74,37 @@ REQUIRED_SMC_FIELDS = [
 
 
 # ============================================================
-# REQUIRED PRICE FIELDS
-# ============================================================
-
-REQUIRED_PRICE_FIELDS = [
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume"
-]
-
-
-# ============================================================
-# VALIDATE NUMERIC VALUE
+# NUMBER VALIDATION
 # ============================================================
 
 def is_valid_number(value):
-    """
-    Check whether a value is a valid finite number.
-    """
 
     try:
-
         value = float(value)
 
         return (
             value == value
-            and value not in (
-                float("inf"),
-                float("-inf")
-            )
+            and value != float("inf")
+            and value != float("-inf")
         )
 
-    except (
-        TypeError,
-        ValueError
-    ):
+    except (TypeError, ValueError):
 
         return False
 
 
 # ============================================================
-# VALIDATE SMC
+# SMC VALIDATION
 # ============================================================
 
 def validate_smc(smc_data):
-    """
-    Validate the SMC structure produced by smc.py.
 
-    The validator only checks fields that actually belong
-    to the current SMC output contract.
-    """
-
-    if not isinstance(
-        smc_data,
-        dict
-    ):
+    if not isinstance(smc_data, dict):
 
         return False
 
     # --------------------------------------------------------
-    # Main SMC fields
+    # Main fields
     # --------------------------------------------------------
 
     for field in REQUIRED_SMC_FIELDS:
@@ -143,14 +117,9 @@ def validate_smc(smc_data):
     # FVG
     # --------------------------------------------------------
 
-    fvg = smc_data.get(
-        "fvg"
-    )
+    fvg = smc_data.get("fvg")
 
-    if not isinstance(
-        fvg,
-        dict
-    ):
+    if not isinstance(fvg, dict):
 
         return False
 
@@ -169,14 +138,9 @@ def validate_smc(smc_data):
     # Order Block
     # --------------------------------------------------------
 
-    order_block = smc_data.get(
-        "order_block"
-    )
+    order_block = smc_data.get("order_block")
 
-    if not isinstance(
-        order_block,
-        dict
-    ):
+    if not isinstance(order_block, dict):
 
         return False
 
@@ -197,29 +161,13 @@ def validate_smc(smc_data):
 # ANALYZE ONE TIMEFRAME
 # ============================================================
 
-def analyze_timeframe(
-    symbol,
-    interval
-):
-    """
-    Analyze one timeframe.
-
-    Pipeline:
-
-        Binance
-           ↓
-        OHLCV
-           ↓
-        Indicators
-           ↓
-        SMC
-           ↓
-        Validation
-           ↓
-        Timeframe Snapshot
-    """
+def analyze_timeframe(symbol, interval):
 
     try:
+
+        log_info(
+            f"{symbol} | {interval} | Starting analysis"
+        )
 
         # ====================================================
         # MARKET DATA
@@ -235,13 +183,23 @@ def analyze_timeframe(
 
             log_warning(
                 f"{symbol} | {interval} | "
-                f"FAILED: no market data"
+                f"FAILED: no candle data"
+            )
+
+            return None
+
+        if len(df) < 200:
+
+            log_warning(
+                f"{symbol} | {interval} | "
+                f"FAILED: insufficient candles "
+                f"({len(df)})"
             )
 
             return None
 
         # ====================================================
-        # PRICE DATA VALIDATION
+        # PRICE VALIDATION
         # ====================================================
 
         for column in REQUIRED_PRICE_FIELDS:
@@ -257,18 +215,16 @@ def analyze_timeframe(
                 return None
 
         # ====================================================
-        # TECHNICAL INDICATORS
+        # INDICATORS
         # ====================================================
 
-        df = add_indicators(
-            df
-        )
+        df = add_indicators(df)
 
         if df is None or df.empty:
 
             log_warning(
                 f"{symbol} | {interval} | "
-                f"FAILED: indicators returned empty data"
+                f"FAILED: indicators returned empty"
             )
 
             return None
@@ -296,101 +252,73 @@ def analyze_timeframe(
         last = df.iloc[-1]
 
         # ====================================================
-        # PRICE VALIDATION
+        # LATEST PRICE VALIDATION
         # ====================================================
 
         for column in REQUIRED_PRICE_FIELDS:
 
-            if not is_valid_number(
-                last[column]
-            ):
+            if not is_valid_number(last[column]):
 
                 log_warning(
                     f"{symbol} | {interval} | "
-                    f"FAILED: invalid price value "
-                    f"{column}"
+                    f"FAILED: invalid price "
+                    f"{column}={last[column]}"
                 )
 
                 return None
 
         # ====================================================
-        # INDICATOR VALUE VALIDATION
+        # LATEST INDICATOR VALIDATION
         # ====================================================
 
         for column in REQUIRED_INDICATORS:
 
-            if not is_valid_number(
-                last[column]
-            ):
+            if not is_valid_number(last[column]):
 
                 log_warning(
                     f"{symbol} | {interval} | "
                     f"FAILED: invalid indicator "
-                    f"{column}"
+                    f"{column}={last[column]}"
                 )
 
                 return None
 
         # ====================================================
-        # SMC ANALYSIS
+        # SMC
         # ====================================================
 
-        smc_data = analyze_smc(
-            df
-        )
+        smc_data = analyze_smc(df)
 
-        if not validate_smc(
-            smc_data
-        ):
+        if not validate_smc(smc_data):
 
             log_warning(
                 f"{symbol} | {interval} | "
-                f"FAILED: invalid SMC structure"
+                f"FAILED: invalid SMC output"
             )
 
             return None
 
         # ====================================================
-        # BUILD TIMEFRAME SNAPSHOT
+        # BUILD SNAPSHOT
         # ====================================================
 
         result = {}
 
-        # ----------------------------------------------------
-        # Price data
-        # ----------------------------------------------------
-
         for column in REQUIRED_PRICE_FIELDS:
 
-            result[column] = float(
-                last[column]
-            )
-
-        # ----------------------------------------------------
-        # Indicators
-        # ----------------------------------------------------
+            result[column] = float(last[column])
 
         for column in REQUIRED_INDICATORS:
 
-            result[column] = float(
-                last[column]
-            )
-
-        # ----------------------------------------------------
-        # SMC
-        # ----------------------------------------------------
+            result[column] = float(last[column])
 
         result["smc"] = smc_data
-
-        # ----------------------------------------------------
-        # Metadata
-        # ----------------------------------------------------
-
         result["timeframe"] = interval
+        result["symbol"] = str(symbol).upper()
 
-        result["symbol"] = str(
-            symbol
-        ).upper()
+        log_info(
+            f"{symbol} | {interval} | OK"
+        )
 
         return result
 
@@ -398,7 +326,7 @@ def analyze_timeframe(
 
         log_error(
             f"{symbol} | {interval} | "
-            f"ANALYSIS ERROR: {error}"
+            f"ANALYSIS ERROR: {type(error).__name__}: {error}"
         )
 
         return None
@@ -409,33 +337,17 @@ def analyze_timeframe(
 # ============================================================
 
 def analyze_symbol(symbol):
-    """
-    Analyze all required timeframes.
 
-    Required:
-
-        5m
-        15m
-        1h
-        4h
-        1d
-
-    A symbol is accepted only when every required
-    timeframe produces valid data.
-    """
-
-    symbol = str(
-        symbol
-    ).upper().strip()
+    symbol = str(symbol).upper().strip()
 
     result = {}
 
     log_info(
-        f"{symbol} | Starting multi-timeframe analysis"
+        f"{symbol} | MTF analysis started"
     )
 
     # ========================================================
-    # ANALYZE EACH TIMEFRAME
+    # ANALYZE ALL TIMEFRAMES
     # ========================================================
 
     for timeframe in TIMEFRAMES:
@@ -448,97 +360,72 @@ def analyze_symbol(symbol):
         if data is None:
 
             log_warning(
-                f"{symbol} | "
-                f"Skipped: {timeframe} timeframe failed"
+                f"{symbol} | MTF FAILED | "
+                f"Failed timeframe: {timeframe}"
             )
 
             return None
 
         result[timeframe] = data
 
-        log_info(
-            f"{symbol} | "
-            f"{timeframe}: OK"
-        )
-
     # ========================================================
     # FINAL VALIDATION
     # ========================================================
 
+    missing = [
+        tf for tf in TIMEFRAMES
+        if tf not in result
+    ]
+
+    if missing:
+
+        log_warning(
+            f"{symbol} | MTF FAILED | "
+            f"Missing: {missing}"
+        )
+
+        return None
+
+    # ========================================================
+    # FINAL DATA VALIDATION
+    # ========================================================
+
     for timeframe in TIMEFRAMES:
 
-        if timeframe not in result:
+        data = result[timeframe]
+
+        if not isinstance(data, dict):
 
             log_warning(
-                f"{symbol} | "
-                f"Skipped: missing {timeframe}"
+                f"{symbol} | MTF FAILED | "
+                f"{timeframe}: invalid snapshot"
             )
 
             return None
 
-        timeframe_data = result[
-            timeframe
-        ]
-
-        if not isinstance(
-            timeframe_data,
-            dict
-        ):
+        if not is_valid_number(data.get("close")):
 
             log_warning(
-                f"{symbol} | "
-                f"Skipped: invalid {timeframe} data"
+                f"{symbol} | MTF FAILED | "
+                f"{timeframe}: invalid close"
             )
 
             return None
 
-        # ----------------------------------------------------
-        # Required close
-        # ----------------------------------------------------
-
-        if not is_valid_number(
-            timeframe_data.get(
-                "close"
-            )
-        ):
+        if not is_valid_number(data.get("atr")):
 
             log_warning(
-                f"{symbol} | "
-                f"Skipped: invalid {timeframe} close"
+                f"{symbol} | MTF FAILED | "
+                f"{timeframe}: invalid ATR"
             )
 
             return None
 
-        # ----------------------------------------------------
-        # Required ATR
-        # ----------------------------------------------------
-
-        if not is_valid_number(
-            timeframe_data.get(
-                "atr"
-            )
-        ):
+        if not validate_smc(data.get("smc")):
 
             log_warning(
-                f"{symbol} | "
-                f"Skipped: invalid {timeframe} ATR"
-            )
-
-            return None
-
-        # ----------------------------------------------------
-        # Required SMC
-        # ----------------------------------------------------
-
-        if not validate_smc(
-            timeframe_data.get(
-                "smc"
-            )
-        ):
-
-            log_warning(
-                f"{symbol} | "
-                f"Skipped: invalid {timeframe} SMC"
+                f"{symbol} | MTF FAILED | "
+                f"{timeframe}: invalid SMC"
             )
 
             return None
@@ -548,8 +435,8 @@ def analyze_symbol(symbol):
     # ========================================================
 
     log_info(
-        f"{symbol} | "
-        f"All timeframes validated successfully"
+        f"{symbol} | MTF COMPLETE | "
+        f"5m + 15m + 1h + 4h + 1d validated"
     )
 
     return result
