@@ -2,16 +2,48 @@ from typing import Dict
 
 
 # ============================================================
-# RISK CONFIGURATION
+# RISK MANAGER V2
 # ============================================================
 
-SL_ATR_MULTIPLIER = 1.5
+# ------------------------------------------------------------
+# STOP LOSS
+# ------------------------------------------------------------
+
+MIN_SL_ATR = 1.5
+DEFAULT_SL_ATR = 1.8
+MAX_SL_ATR = 3.0
+
+# ------------------------------------------------------------
+# TAKE PROFIT
+# ------------------------------------------------------------
 
 TP1_RR = 1.5
 TP2_RR = 2.5
 TP3_RR = 4.0
 
-MIN_RISK_REWARD = 1.5
+# ------------------------------------------------------------
+# TRADE QUALITY
+# ------------------------------------------------------------
+
+MIN_RISK_REWARD = 2.0
+MAX_RISK_PERCENT = 6.0
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def safe_float(value, default=None):
+    """
+    Safely convert a value to float.
+    """
+
+    try:
+        return float(value)
+
+    except (TypeError, ValueError):
+
+        return default
 
 
 # ============================================================
@@ -24,101 +56,274 @@ def calculate_trade(
     signal_data: Dict
 ):
     """
-    Calculate Entry, Stop Loss, Take Profit,
-    Risk/Reward and Suggested Leverage.
+    Calculate a complete trade setup.
 
-    This function is compatible with the output
-    produced by signals.py.
+    Pipeline:
+
+        Entry
+          ↓
+        ATR-based SL
+          ↓
+        Actual Risk
+          ↓
+        TP1 / TP2 / TP3
+          ↓
+        RR Validation
+          ↓
+        Trade Quality Check
     """
 
     # ========================================================
     # VALIDATION
     # ========================================================
 
-    if price <= 0:
+    entry = safe_float(
+        price
+    )
+
+    atr = safe_float(
+        atr
+    )
+
+    if entry is None or entry <= 0:
         return {}
 
-    if atr <= 0:
+    if atr is None or atr <= 0:
         return {}
 
-    direction = signal_data.get("direction")
-    market = signal_data.get("market")
-    confidence = signal_data.get("confidence")
-
-    if direction not in ["BUY", "LONG", "SHORT"]:
+    if not isinstance(
+        signal_data,
+        dict
+    ):
         return {}
 
-    if market not in ["SPOT", "FUTURES"]:
+    direction = str(
+        signal_data.get(
+            "direction",
+            ""
+        )
+    ).upper()
+
+    market = str(
+        signal_data.get(
+            "market",
+            ""
+        )
+    ).upper()
+
+    confidence = str(
+        signal_data.get(
+            "confidence",
+            ""
+        )
+    ).upper()
+
+    if direction not in [
+        "BUY",
+        "LONG",
+        "SHORT"
+    ]:
+        return {}
+
+    if market not in [
+        "SPOT",
+        "FUTURES"
+    ]:
         return {}
 
     # ========================================================
-    # ENTRY
+    # ATR STOP DISTANCE
     # ========================================================
 
-    entry = float(price)
+    risk_distance = (
+        atr * DEFAULT_SL_ATR
+    )
+
+    minimum_distance = (
+        atr * MIN_SL_ATR
+    )
+
+    maximum_distance = (
+        atr * MAX_SL_ATR
+    )
+
+    # --------------------------------------------------------
+    # Protect against abnormal ATR values
+    # --------------------------------------------------------
+
+    if risk_distance < minimum_distance:
+
+        risk_distance = minimum_distance
+
+    if risk_distance > maximum_distance:
+
+        risk_distance = maximum_distance
 
     # ========================================================
     # STOP LOSS
     # ========================================================
 
-    risk_distance = atr * SL_ATR_MULTIPLIER
+    if direction in [
+        "BUY",
+        "LONG"
+    ]:
 
-    if direction in ["BUY", "LONG"]:
-
-        stop_loss = entry - risk_distance
+        stop_loss = (
+            entry - risk_distance
+        )
 
     elif direction == "SHORT":
 
-        stop_loss = entry + risk_distance
+        stop_loss = (
+            entry + risk_distance
+        )
 
     else:
+
         return {}
 
     # ========================================================
-    # RISK
+    # ACTUAL RISK
     # ========================================================
 
-    risk = abs(entry - stop_loss)
+    risk = abs(
+        entry - stop_loss
+    )
 
     if risk <= 0:
+        return {}
+
+    # ========================================================
+    # RISK PERCENTAGE
+    # ========================================================
+
+    risk_percent = (
+        risk / entry
+    ) * 100
+
+    # --------------------------------------------------------
+    # Reject excessively wide stop
+    # --------------------------------------------------------
+
+    if risk_percent > MAX_RISK_PERCENT:
+
         return {}
 
     # ========================================================
     # TAKE PROFITS
     # ========================================================
 
-    if direction in ["BUY", "LONG"]:
+    if direction in [
+        "BUY",
+        "LONG"
+    ]:
 
-        tp1 = entry + (risk * TP1_RR)
-        tp2 = entry + (risk * TP2_RR)
-        tp3 = entry + (risk * TP3_RR)
+        tp1 = entry + (
+            risk * TP1_RR
+        )
+
+        tp2 = entry + (
+            risk * TP2_RR
+        )
+
+        tp3 = entry + (
+            risk * TP3_RR
+        )
 
     elif direction == "SHORT":
 
-        tp1 = entry - (risk * TP1_RR)
-        tp2 = entry - (risk * TP2_RR)
-        tp3 = entry - (risk * TP3_RR)
+        tp1 = entry - (
+            risk * TP1_RR
+        )
+
+        tp2 = entry - (
+            risk * TP2_RR
+        )
+
+        tp3 = entry - (
+            risk * TP3_RR
+        )
 
     else:
+
         return {}
+
+    # ========================================================
+    # VALIDATE TP ORDER
+    # ========================================================
+
+    if direction in [
+        "BUY",
+        "LONG"
+    ]:
+
+        if not (
+            tp1 > entry
+            and tp2 > tp1
+            and tp3 > tp2
+        ):
+            return {}
+
+    elif direction == "SHORT":
+
+        if not (
+            tp1 < entry
+            and tp2 < tp1
+            and tp3 < tp2
+        ):
+            return {}
 
     # ========================================================
     # RISK / REWARD
     # ========================================================
 
-    reward = abs(tp2 - entry)
+    reward_tp1 = abs(
+        tp1 - entry
+    )
 
-    if reward <= 0:
+    reward_tp2 = abs(
+        tp2 - entry
+    )
+
+    reward_tp3 = abs(
+        tp3 - entry
+    )
+
+    rr_tp1 = (
+        reward_tp1 / risk
+    )
+
+    rr_tp2 = (
+        reward_tp2 / risk
+    )
+
+    rr_tp3 = (
+        reward_tp3 / risk
+    )
+
+    # --------------------------------------------------------
+    # Minimum RR validation
+    # --------------------------------------------------------
+
+    if rr_tp2 < MIN_RISK_REWARD:
+
         return {}
 
-    risk_reward = reward / risk
+    # ========================================================
+    # REWARD PERCENTAGES
+    # ========================================================
 
-    if risk_reward < MIN_RISK_REWARD:
-        return {}
+    tp1_percent = (
+        reward_tp1 / entry
+    ) * 100
 
-    risk_percent = (risk / entry) * 100
+    tp2_percent = (
+        reward_tp2 / entry
+    ) * 100
 
-    reward_percent = (reward / entry) * 100
+    tp3_percent = (
+        reward_tp3 / entry
+    ) * 100
 
     # ========================================================
     # LEVERAGE
@@ -130,13 +335,9 @@ def calculate_trade(
 
     elif confidence == "VERY HIGH":
 
-        leverage = "5x"
-
-    elif confidence == "HIGH":
-
         leverage = "3x"
 
-    elif confidence == "MEDIUM":
+    elif confidence == "HIGH":
 
         leverage = "2x"
 
@@ -145,28 +346,109 @@ def calculate_trade(
         leverage = "None"
 
     # ========================================================
-    # RETURN
+    # ROUNDING
+    # ========================================================
+
+    entry = round(
+        entry,
+        8
+    )
+
+    stop_loss = round(
+        stop_loss,
+        8
+    )
+
+    tp1 = round(
+        tp1,
+        8
+    )
+
+    tp2 = round(
+        tp2,
+        8
+    )
+
+    tp3 = round(
+        tp3,
+        8
+    )
+
+    # ========================================================
+    # FINAL RETURN
     # ========================================================
 
     return {
 
-        "market": market,
+        "market":
+            market,
 
-        "direction": direction,
+        "direction":
+            direction,
 
-        "entry": round(entry, 8),
+        "entry":
+            entry,
 
-        "stop_loss": round(stop_loss, 8),
+        "stop_loss":
+            stop_loss,
 
-        "tp1": round(tp1, 8),
-        "tp2": round(tp2, 8),
-        "tp3": round(tp3, 8),
+        "tp1":
+            tp1,
 
-        "risk_percent": round(risk_percent, 2),
+        "tp2":
+            tp2,
 
-        "reward_percent": round(reward_percent, 2),
+        "tp3":
+            tp3,
 
-        "risk_reward": round(risk_reward, 2),
+        "risk_percent":
+            round(
+                risk_percent,
+                2
+            ),
 
-        "suggested_leverage": leverage
+        "tp1_percent":
+            round(
+                tp1_percent,
+                2
+            ),
+
+        "tp2_percent":
+            round(
+                tp2_percent,
+                2
+            ),
+
+        "tp3_percent":
+            round(
+                tp3_percent,
+                2
+            ),
+
+        "risk_reward":
+            round(
+                rr_tp2,
+                2
+            ),
+
+        "tp1_rr":
+            round(
+                rr_tp1,
+                2
+            ),
+
+        "tp2_rr":
+            round(
+                rr_tp2,
+                2
+            ),
+
+        "tp3_rr":
+            round(
+                rr_tp3,
+                2
+            ),
+
+        "suggested_leverage":
+            leverage
     }
